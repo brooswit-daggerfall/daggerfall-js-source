@@ -315,10 +315,52 @@ ENV_ARGS+=(--setenv CONTAINED_RUN_REAL_HOME_ID "$REAL_HOME_ID" --setenv CONTAINE
 # Disposable RUNNER_TEMP staging, per-caller transfer contract (see "DISPOSABLE RUNNER_TEMP
 # STAGING" above): the disposable directory starts and stays EMPTY except for exactly the one
 # input and/or one output path a caller names - never a copy of the real directory's contents.
+#
+# PATH TRAVERSAL / SYMLINK HANDLING (REVIEW FIX, DFO-83 52258: "must examine... path
+# traversal/symlink handling and fail-closed bounded input/output transfer, not just the
+# receipt" - both callers today set a fixed, trusted, hardcoded literal (test-times /
+# test-times.json), but the mechanism itself is validated here regardless, not left to trust the
+# caller):
+#   - reject_unsafe_rel() rejects an absolute path or any `..`/empty path segment textually,
+#     before either variable is used for anything - covers a bad value in EITHER variable, input
+#     or output, even though the destination for an output path does not exist yet to canonicalize.
+#   - for CONTAINED_RUN_TEMP_IN specifically, the SOURCE is additionally canonicalized with
+#     `realpath -e` (resolves every symlink in the path, requires every component to exist) and
+#     the result is required to still fall inside the canonicalized real RUNNER_TEMP directory -
+#     this is what the textual check alone cannot catch: a symlink planted at or under the named
+#     path (by anything that wrote into RUNNER_TEMP before this ran) resolving outside it. Fails
+#     closed (exit 93) on either kind of violation, same as a missing declared input.
+#   - for CONTAINED_RUN_TEMP_OUT, the copy-back additionally refuses (skips, does not treat as
+#     fatal - the wrapped command's own exit code already carries pass/fail) if what the sandboxed
+#     command staged at that path is ITSELF a symlink: `cp -a` never follows a symlink SOURCE, so
+#     copying it back would place a (possibly dangling, possibly sandbox-internal-pointing) symlink
+#     into the real, live RUNNER_TEMP directory rather than the real file content a caller expects.
+reject_unsafe_rel() {
+  local rel="$1" label="$2"
+  case "$rel" in
+    /*)
+      echo "containedRun: $label ($rel) must be a relative path, not absolute - refusing to run: $*" >&2
+      exit 93
+      ;;
+  esac
+  local seg
+  local IFS=/
+  for seg in $rel; do
+    if [ "$seg" = ".." ] || [ -z "$seg" ]; then
+      echo "containedRun: $label ($rel) must not contain '..' or empty segments - refusing to run: $*" >&2
+      exit 93
+    fi
+  done
+}
+
 TEMP_IN_REL="${CONTAINED_RUN_TEMP_IN:-}"
 TEMP_OUT_REL="${CONTAINED_RUN_TEMP_OUT:-}"
+[ -n "$TEMP_IN_REL" ] && reject_unsafe_rel "$TEMP_IN_REL" "CONTAINED_RUN_TEMP_IN"
+[ -n "$TEMP_OUT_REL" ] && reject_unsafe_rel "$TEMP_OUT_REL" "CONTAINED_RUN_TEMP_OUT"
+
 STAGE_DIR=""
 if [ -n "$RUNNER_TEMP_DIR" ] && { [ -n "$TEMP_IN_REL" ] || [ -n "$TEMP_OUT_REL" ]; }; then
+  mkdir -p "$RUNNER_TEMP_DIR"
   STAGE_DIR="$(mktemp -d)"
   if [ -n "$TEMP_IN_REL" ]; then
     SRC="$RUNNER_TEMP_DIR/$TEMP_IN_REL"
@@ -326,6 +368,15 @@ if [ -n "$RUNNER_TEMP_DIR" ] && { [ -n "$TEMP_IN_REL" ] || [ -n "$TEMP_OUT_REL" 
       echo "containedRun: declared input \$RUNNER_TEMP/$TEMP_IN_REL (CONTAINED_RUN_TEMP_IN) does not exist - refusing to run without it: $*" >&2
       exit 94
     fi
+    RUNNER_TEMP_REAL="$(realpath -e "$RUNNER_TEMP_DIR")"
+    SRC_REAL="$(realpath -e "$SRC")"
+    case "$SRC_REAL" in
+      "$RUNNER_TEMP_REAL"|"$RUNNER_TEMP_REAL"/*) ;;
+      *)
+        echo "containedRun: declared input \$RUNNER_TEMP/$TEMP_IN_REL resolves to $SRC_REAL, outside \$RUNNER_TEMP ($RUNNER_TEMP_REAL) - a symlink or traversal; refusing to run: $*" >&2
+        exit 93
+        ;;
+    esac
     mkdir -p "$(dirname "$STAGE_DIR/$TEMP_IN_REL")"
     cp -a "$SRC" "$STAGE_DIR/$TEMP_IN_REL"
   fi
@@ -335,8 +386,12 @@ if [ -n "$RUNNER_TEMP_DIR" ] && { [ -n "$TEMP_IN_REL" ] || [ -n "$TEMP_OUT_REL" 
 fi
 cleanup_stage() {
   if [ -n "$STAGE_DIR" ] && [ -n "$TEMP_OUT_REL" ] && [ -e "$STAGE_DIR/$TEMP_OUT_REL" ]; then
-    mkdir -p "$(dirname "$RUNNER_TEMP_DIR/$TEMP_OUT_REL")"
-    cp -a "$STAGE_DIR/$TEMP_OUT_REL" "$RUNNER_TEMP_DIR/$TEMP_OUT_REL"
+    if [ -L "$STAGE_DIR/$TEMP_OUT_REL" ]; then
+      echo "containedRun: output \$RUNNER_TEMP/$TEMP_OUT_REL was staged as a symlink by the sandboxed command - not copying it back to the real directory" >&2
+    else
+      mkdir -p "$(dirname "$RUNNER_TEMP_DIR/$TEMP_OUT_REL")"
+      cp -a "$STAGE_DIR/$TEMP_OUT_REL" "$RUNNER_TEMP_DIR/$TEMP_OUT_REL"
+    fi
   fi
   [ -n "$STAGE_DIR" ] && rm -rf "$STAGE_DIR"
 }
