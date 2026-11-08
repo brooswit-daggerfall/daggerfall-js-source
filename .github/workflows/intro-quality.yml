@@ -1,9 +1,11 @@
 name: intro quality
 
-# DFO-83/DFO-11 (not yet authorized to run): every step below that runs repository code (the
-# intro's own tests, the audio check, the live probe, the review capture) goes through
-# tools/containedRun.sh - see that script for why. npm ci, the Playwright browser install and the
-# ffmpeg check stay outside it: each needs the real registry/CDN/package feed.
+# DFO-83/DFO-11 (not yet authorized to run): every step below that runs repository or dependency
+# code - dependency acquisition (--allow-network npm ci --ignore-scripts), dependency lifecycle
+# scripts (npm rebuild), the intro's own tests, the audio check, the live probe, the review
+# capture - goes through tools/containedRun.sh - see that script for why. The Playwright browser
+# install and the ffmpeg check stay outside it: both need real network AND real system-level
+# package-manager write access (apt), which no credential/HOME-isolation model here addresses.
 
 on:
   push:
@@ -49,7 +51,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - name: Install dependencies
+        # DFO-83/DFO-11: acquisition only (--ignore-scripts) - no lifecycle script runs with real network/HOME
+        run: tools/containedRun.sh --allow-network npm ci --ignore-scripts
+      - name: Dependency lifecycle scripts
+        # esbuild's own postinstall is the only one present (checked every installed package.json) and needs
+        # no network on this locked tree - see tools/containedRun.sh for why; runs inside the full boundary
+        run: tools/containedRun.sh npm rebuild
       - run: npx playwright install --with-deps chromium
       # INTRO3b: the runner image carries ffmpeg; apt is asked only where it does not (one run spent 15 of the job's
       # 25 minutes in `apt-get update` and was cancelled before a probe ran)

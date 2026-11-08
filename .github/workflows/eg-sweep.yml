@@ -80,8 +80,14 @@ jobs:
           path: node_modules
           key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
       - name: Install dependencies
+        # DFO-83/DFO-11: acquisition only (--ignore-scripts) - no lifecycle script runs with real network/HOME
         if: steps.deps.outputs.cache-hit != 'true'
-        run: npm ci
+        run: tools/containedRun.sh --allow-network npm ci --ignore-scripts
+      - name: Dependency lifecycle scripts
+        # esbuild's own postinstall is the only one present (checked every installed package.json) and needs
+        # no network on this locked tree - see tools/containedRun.sh for why; runs inside the full boundary
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: tools/containedRun.sh npm rebuild
       - name: Cross every course of band ${{ matrix.band }} with the real motor
         run: tools/containedRun.sh node tools/egSpanSolve.mjs --sweep --band ${{ matrix.band }} --seeds ${{ inputs.seeds || 500 }} --golden --part ${{ matrix.part }}/${{ matrix.parts }}
       - name: Walk every synthetic LAW 9 hall's route of band ${{ matrix.band }} with the real motor

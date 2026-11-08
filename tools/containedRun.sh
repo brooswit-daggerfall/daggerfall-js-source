@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
 # DFO-83 / DFO-11 containment design — NOT YET AUTHORIZED TO RUN.
 #
-# Checked in for independent static review only. Runs one repository command (lint, types, a
-# test shard, a build, an eg-sweep course sweep, an intro-quality probe — anything already
-# documented in a retained workflow) with:
+# Checked in for independent static review only. Two modes, same boundary:
+#   tools/containedRun.sh <command>                    network DENIED (default) - repository and
+#                                                       dependency LIFECYCLE code (lint, types, a
+#                                                       test shard, a build, a sweep, `npm rebuild`).
+#   tools/containedRun.sh --allow-network <command>     network ALLOWED - the ONE step that needs
+#                                                       it (`npm ci --ignore-scripts`, acquisition
+#                                                       only, no lifecycle scripts). See "DEPENDENCY
+#                                                       ACQUISITION vs. LIFECYCLE EXECUTION" below
+#                                                       for why both modes share this one script.
+# Both modes apply:
 #   1. an ENVIRONMENT ALLOWLIST — `bwrap --clearenv` starts the sandboxed process with NO
 #      environment at all, then only the names below are re-added with `--setenv`, so any
 #      credential-shaped variable this shell happened to inherit (a developer's export, an
 #      org/environment-level secret, ...) is dropped by construction, not by trying to name and
-#      unset it (a denylist would miss whatever we didn't think to name);
+#      unset it (a denylist would miss whatever we didn't think to name). This applies to the
+#      `--allow-network` acquisition phase too (REVIEW FIX, DFO-83 52222/52236: "do not inherit
+#      real HOME/config" was a requirement on dependency preparation, not only on lifecycle code);
 #   2. an ALLOWLISTED FILESYSTEM BOUNDARY built by `bwrap` (bubblewrap), not a hand-rolled
 #      `unshare`/`mount` script (REVIEW FIX, DFO-83 52222: a prior draft here only replaced $HOME
 #      with a fresh tmpfs inside a private mount namespace it assembled itself - a real
@@ -17,26 +26,28 @@
 #      process sees ONLY what is explicitly bound in below: the read-only system directories a
 #      dynamically-linked `node`/`bash`/`git` needs to run at all (/usr, /bin, /lib, /lib64), a
 #      fresh /proc and /dev bwrap constructs itself (not the host's), a fresh empty /tmp, the
-#      repository checkout and the CI runner's scratch/tool-cache directories at their original
-#      paths (all required - see "WHY EACH BIND EXISTS" below), and a fresh empty tmpfs standing
-#      in for $HOME. Nothing else on the host - no other path, credential file, or mounted
-#      secret - is reachable from inside the sandbox by any name, literal or discovered, because
-#      nothing else was ever bound in. This also sidesteps a correctness problem the hand-rolled
-#      version had to solve by hand (anchoring the checkout outside $HOME before masking it, then
-#      binding the anchor back): bwrap resolves every `--bind SRC DEST` source against the real
-#      host filesystem regardless of where it falls in the argument list, so `--tmpfs $HOME`
-#      followed by `--bind $ROOT $ROOT` (with $ROOT nested under $HOME, as it is on GitHub-hosted
-#      runners) correctly ends up with $ROOT visible and the rest of $HOME masked, with no
-#      ordering trick of ours required - that is bwrap's own documented design, not an assumption;
-#   3. a NETWORK-DENIED namespace (`--unshare-net`): no interface but loopback, so a request
-#      toward any real external host fails at the kernel (ECONNREFUSED/ENETUNREACH), not a
-#      best-effort stub. `--unshare-pid` additionally hides the host's own process tree (see
-#      "CHILD-PROCESS CONFINEMENT" below - this is load-bearing for that claim, not decorative);
-#   4. FAIL-CLOSED canaries before the real command runs: if a real external host still answers
-#      (the network namespace did not take), if $HOME still resolves to the real filesystem
-#      object (the tmpfs mount did not take), or if the checkout's own package.json is missing
-#      (the bind-in did not take), this refuses to run the real command rather than proceed
-#      unprotected.
+#      repository checkout at its original path, a DISPOSABLE STAGING COPY of the CI runner's
+#      scratch directory rather than the real one (see "DISPOSABLE RUNNER_TEMP STAGING" below),
+#      and a fresh empty tmpfs standing in for $HOME. Nothing else on the host - no other path,
+#      credential file, or mounted secret - is reachable from inside the sandbox by any name,
+#      literal or discovered, because nothing else was ever bound in. This also sidesteps a
+#      correctness problem the hand-rolled version had to solve by hand (anchoring the checkout
+#      outside $HOME before masking it, then binding the anchor back): bwrap resolves every
+#      `--bind SRC DEST` source against the real host filesystem regardless of where it falls in
+#      the argument list, so `--tmpfs $HOME` followed by `--bind $ROOT $ROOT` (with $ROOT nested
+#      under $HOME, as it is on GitHub-hosted runners) correctly ends up with $ROOT visible and the
+#      rest of $HOME masked, with no ordering trick of ours required - that is bwrap's own
+#      documented design, not an assumption;
+#   3. a NETWORK-DENIED namespace (`--unshare-net`) in the default mode only: no interface but
+#      loopback, so a request toward any real external host fails at the kernel
+#      (ECONNREFUSED/ENETUNREACH), not a best-effort stub. `--unshare-pid` (both modes)
+#      additionally hides the host's own process tree (see "CHILD-PROCESS CONFINEMENT" below -
+#      this is load-bearing for that claim, not decorative);
+#   4. FAIL-CLOSED canaries before the real command runs: in default mode, if a real external host
+#      still answers (the network namespace did not take), this refuses to run. In BOTH modes: if
+#      $HOME still resolves to the real filesystem object (the tmpfs mount did not take), or if the
+#      checkout's own package.json is missing (the bind-in did not take), this refuses to run the
+#      real command rather than proceed unprotected.
 #
 # WHY EACH BIND EXISTS (none of these are "trust the rest of the host" - each is named because a
 # specific caller below needs exactly it, verified by reading that caller, not assumed):
@@ -55,11 +66,27 @@
 #   - $ROOT (the repository checkout, read-write): every wrapped command's own code and the files
 #     it reads or writes (test-harness/ output, a generated src/firstVisitPins.js, dist/ from a
 #     build) live here.
-#   - $RUNNER_TEMP (read-write, if set): `tools/testShards.mjs --record` writes a shard's file
-#     times here, and it is itself a subdirectory of $HOME on GitHub-hosted runners (see above).
+#   - a DISPOSABLE COPY of $RUNNER_TEMP, bound at its real path (read-write, if $RUNNER_TEMP is
+#     set) - see "DISPOSABLE RUNNER_TEMP STAGING" immediately below; not a live bind of the real
+#     directory.
 #   - /proc, /dev, /tmp: bwrap's own freshly-constructed versions (not the host's), needed for
 #     ordinary process operation (reading own PID's /proc entry, /dev/null, /dev/urandom, a scratch
 #     /tmp some tools assume exists) - not a bind of anything the host itself put there.
+#
+# DISPOSABLE RUNNER_TEMP STAGING (REVIEW FIX, DFO-83 52222/52236: "broad runner-temp credential
+# surfaces" / "narrowly scoped disposable temp paths" - a prior draft bound the REAL $RUNNER_TEMP
+# directory straight into the sandbox read-write. That is live, shared CI-runner scratch space -
+# whatever else any other step or action left there is a real directory the sandboxed command
+# could read, not just the one file or subdirectory the caller actually needs. Fixed by never
+# binding the real directory in at all: before the sandbox runs, its current contents are copied
+# (`cp -a`) into a freshly created, disposable directory (`mktemp -d`, on the real host, never
+# inside the sandbox); THAT disposable copy - not the real directory - is what gets bound at the
+# real $RUNNER_TEMP path inside the sandbox, so a command's own `$RUNNER_TEMP`-relative reads/
+# writes work unmodified. After the command exits (success or failure - this still needs to run,
+# matching the existing tolerance for a partial/missing record file elsewhere in these workflows),
+# the disposable copy's resulting contents are copied back out over the real directory, then the
+# disposable copy is deleted. The sandboxed process therefore only ever sees a point-in-time,
+# single-invocation copy, round-tripped - never the live directory other steps/jobs share.
 #
 # CHILD-PROCESS CONFINEMENT, stated accurately rather than assumed (REVIEW FIX, DFO-83 52222: the
 # prior draft's header claimed "a child that itself calls `unshare` to leave the namespace is not
@@ -80,37 +107,39 @@
 # kernel or bwrap-itself vulnerability - a threat model every sandboxing approach shares, including
 # a full container, and outside what any script-level design here can close.
 #
-# DEPENDENCY ACQUISITION vs. REPOSITORY LIFECYCLE EXECUTION (REVIEW FIX, DFO-83 52222 point 3):
-# `npm ci` legitimately needs the real registry and real network, and stays outside this script
-# for that reason, as before. But package.json's own top-level `"postinstall": "node
-# scripts/firstVisitPins.mjs"` hook meant OUR repository's own code (not a third-party package's)
-# ran automatically, uncontained, DURING that networked `npm ci` phase - the exact coupling this
-# review comment asked to be separated. Fixed by removing that top-level postinstall script
-# entirely (see package.json) rather than reaching for a blanket `npm ci --ignore-scripts`: reading
-# every installed package's own lifecycle scripts first (not assumed) found `esbuild`'s own
-# `postinstall` ("node install.js", which fetches ITS OWN platform-specific native binary) is the
-# only one present in this tree today, and it is load-bearing - `npm run build` uses esbuild
-# directly (via Vite and scripts/privateRelay.mjs), so suppressing ALL install scripts would
-# silently break the build the first time it actually ran, which is exactly the "preserve
-# necessary install behavior explicitly rather than silently omit it" failure mode this comment
-# warned against. A third-party package fetching its own published native binary from its own
-# trusted distribution channel, as a normal part of what "installing a dependency" means in the
-# npm ecosystem, is not the same risk category DFO-11 is about (OUR repository code reaching a
-# live Stripe endpoint) - so `npm ci` keeps running scripts, unwrapped, as before. What changed is
-# narrower and verified: firstVisitPins.mjs no longer runs as part of that phase at all. It is
-# still generated exactly as before, just always via the explicit "FIRST-VISIT pins" step each
-# workflow already has (now load-bearing on every run, not only a cache-hit fallback - which is
-# itself a simplification, since that step previously ran twice on a cache miss: once via
-# postinstall during `npm ci`, once via itself) and via the Vite build plugin
-# (firstVisitPinsPlugin) that already regenerates it independently at the start of every build -
-# both of those paths run INSIDE this script already. Going further and denying `npm ci` itself
-# the real $HOME/registry cache (which 52222 also asks for - "do not inherit real HOME/config" for
-# dependency preparation) is explicitly NOT attempted here: distinguishing which of this project's
-# other dependencies' install scripts are load-bearing (only esbuild's was checked exhaustively;
-# the rest were read for an install/postinstall KEY, not for whether the logic behind it is
-# load-bearing) from which are safe to suppress cannot be done reliably without either running
-# `npm ci --ignore-scripts` to see what breaks (no execution authorized) or auditing every
-# dependency's install-time logic by hand - named as an open prerequisite below, not guessed at.
+# DEPENDENCY ACQUISITION vs. LIFECYCLE EXECUTION (REVIEW FIX, DFO-83 52222/52236: "Esbuild's
+# required install behavior must be preserved, not used to exempt dependency scripts from the
+# credential-free phase/boundary" - a prior draft here left `npm ci` (scripts included) entirely
+# outside this script, reasoning that esbuild's own `postinstall` needed the real registry/network.
+# That reasoning is withdrawn: it was never actually verified against esbuild's own code. Reading
+# node_modules/esbuild/install.js (0.28.1): its `checkAndPreparePackage()` first does
+# `require.resolve('@esbuild/linux-x64/bin/esbuild')` (the platform package) - and ONLY falls back
+# to a live HTTPS download (`downloadDirectlyFromNPM`) in the `catch` branch, if that local resolve
+# fails. `@esbuild/linux-x64` is declared as an `optionalDependencies` entry in esbuild's own
+# package.json and is pinned with a `resolved` registry URL in package-lock.json - meaning
+# `npm ci --ignore-scripts` (which skips lifecycle SCRIPTS/hooks but NOT ordinary dependency
+# resolution - optionalDependencies are still installed as regular packages) places it in
+# node_modules on its own, before any script runs. So on this locked dependency tree, esbuild's
+# postinstall takes the local-only path (`require.resolve` succeeds) and makes no network call -
+# confirmed by reading its logic, not assumed from its presence in node_modules. It CAN safely run
+# inside the network-denied boundary. This produces an actual two-phase split, not an exemption:
+#   1. ACQUISITION (`tools/containedRun.sh --allow-network npm ci --ignore-scripts`): network
+#      allowed (the registry fetch needs it), but $HOME is still the isolated tmpfs and the env
+#      is still allowlisted - credential-free, as required, just not network-denied. No lifecycle
+#      script runs in this phase, ours or any dependency's.
+#   2. LIFECYCLE EXECUTION (`tools/containedRun.sh npm rebuild`, default network-denied mode):
+#      re-runs every installed package's own install/postinstall scripts (today, only esbuild's -
+#      confirmed by reading every installed package.json for an install/preinstall/postinstall key)
+#      inside the full boundary, network denied. `npm rebuild` (not naming `esbuild` specifically)
+#      is deliberately not narrowed further: a future dependency's own lifecycle script would be
+#      picked up automatically, and if one ever genuinely needs network unlike esbuild's does, this
+#      FAILS CLOSED (the build breaks loudly, complaining network is unavailable) rather than
+#      silently running it with real network/credentials - the correct failure direction even
+#      though it would need a human decision to resolve, not a silent compromise either way.
+# package.json's own former top-level `postinstall` (our repository's OWN code, not a dependency's)
+# is a separate, already-fixed issue: removed from package.json entirely, it now runs only via the
+# explicit, already-contained FIRST-VISIT pins step and the Vite build plugin that independently
+# regenerates it - see those files for that half of this.
 #
 # WHAT A GREP CANNOT PROVE (REVIEW FIX, DFO-83 52222, correcting 52217's methodology): an earlier
 # comment on this ticket treated "no `import` of `http`/`https`/a fetch-named package" in
@@ -150,6 +179,8 @@
 #     but not tested.
 #   - the /usr, /bin, /lib, /lib64 read-only bind is a coarse toolchain surface, not narrowed to
 #     the exact binaries/libraries each wrapped command needs (see "WHY EACH BIND EXISTS" above).
+#   - `npm rebuild`'s own exit behaviour and output when there is genuinely nothing to rebuild (a
+#     cache-hit path never calls it at all - see "Callers" below) is not exercised here either.
 #
 # WHY THIS EXISTS (DFO-11 / DFO-83, 2026-11-07): the retained check.yml -> verify.yml workflow
 # runs test/**/*.test.js via tools/testShards.mjs — the SAME set DFO-11's own full run stopped
@@ -170,20 +201,25 @@
 # boundary are defense against what the invoking SHELL/RUNNER inherits regardless of that, which is
 # DFO-11's actual concern.
 #
-# Callers: every retained workflow step that runs repository code is wired through this script —
-# not just the eight test shards:
-#   - check.yml's verify.yml: the FIRST-VISIT pins step, `npm run lint`, `npm run types`, each
-#     test shard (`node tools/testShards.mjs <i>/8`), and `npm run build`.
-#   - test-times.yml: the merge step (`node tools/testTimes.mjs --merge ...`).
-#   - eg-sweep.yml: both sweep steps (the course sweep and the law9 walk).
-#   - intro-quality.yml: the intro's own tests, the audio landmark check, the live probe, and the
-#     review capture.
-# It must NOT wrap `npm ci`, `npx playwright install --with-deps chromium`, or the `which ffmpeg
-# || apt-get install` step — those legitimately need the real registry/CDN/package feed and stay
-# in a separate, explicitly network-allowed preparation phase that runs BEFORE this script, never
-# inside it.
+# Callers: every retained workflow step that runs repository or dependency-lifecycle code is wired
+# through this script:
+#   - check.yml's verify.yml (all 3 jobs): `npm ci --ignore-scripts` (--allow-network) and
+#     `npm rebuild` on a cache miss, the FIRST-VISIT pins step, `npm run lint`, `npm run types`,
+#     each test shard (`node tools/testShards.mjs <i>/8`), and `npm run build`.
+#   - test-times.yml: the merge step (`node tools/testTimes.mjs --merge ...`). No npm ci here -
+#     this job does not need node_modules.
+#   - eg-sweep.yml: `npm ci --ignore-scripts`/`npm rebuild` on a cache miss, and both sweep steps.
+#   - intro-quality.yml: `npm ci --ignore-scripts`/`npm rebuild`, the intro's own tests, the audio
+#     landmark check, the live probe, and the review capture.
+# It must NOT wrap `npx playwright install --with-deps chromium` or the `which ffmpeg || apt-get
+# install` step: both need real network AND real system-level write access (`--with-deps`/apt
+# write to /var/lib/dpkg, /etc/apt - not something any $HOME/credential-isolation model addresses,
+# and not bound into this sandbox's filesystem allowlist at all), so neither fits either mode of
+# this script. They stay in a separate, unwrapped step as before.
 #
 # Usage (once this design is reviewed and the execution hold is explicitly released):
+#   tools/containedRun.sh --allow-network npm ci --ignore-scripts
+#   tools/containedRun.sh npm rebuild
 #   tools/containedRun.sh npm run lint
 #   tools/containedRun.sh npm run types
 #   tools/containedRun.sh node tools/testShards.mjs 1/1
@@ -200,13 +236,21 @@
 
 set -euo pipefail
 
+NETWORK_MODE="deny"
+if [ "${1-}" = "--allow-network" ]; then
+  NETWORK_MODE="allow"
+  shift
+fi
+
 if [ "${1-}" = "--inside-sandbox" ]; then
   shift
   # Already inside the bwrap sandbox below: namespaces applied, env cleared and reallowlisted,
   # filesystem assembled. Verify it actually took before running the real command.
-  if timeout 2 bash -c 'exec 3<>/dev/tcp/1.1.1.1/443' 2>/dev/null; then
-    echo "containedRun: a real external host answered from inside the sandbox - network isolation did not take; refusing to run: $*" >&2
-    exit 97
+  if [ "${CONTAINED_RUN_NETWORK_MODE:-deny}" = "deny" ]; then
+    if timeout 2 bash -c 'exec 3<>/dev/tcp/1.1.1.1/443' 2>/dev/null; then
+      echo "containedRun: a real external host answered from inside the sandbox - network isolation did not take; refusing to run: $*" >&2
+      exit 97
+    fi
   fi
   if [ "$(stat -c '%d:%i' "$HOME" 2>/dev/null || echo unknown)" = "${CONTAINED_RUN_REAL_HOME_ID:?CONTAINED_RUN_REAL_HOME_ID must be set by the parent}" ]; then
     echo "containedRun: \$HOME ($HOME) still resolves to the real filesystem object - credential isolation did not take; refusing to run: $*" >&2
@@ -216,12 +260,12 @@ if [ "${1-}" = "--inside-sandbox" ]; then
     echo "containedRun: $CONTAINED_RUN_ROOT/package.json is missing inside the sandbox - the repository checkout was not bound in correctly; refusing to run: $*" >&2
     exit 95
   fi
-  unset CONTAINED_RUN_REAL_HOME_ID CONTAINED_RUN_ROOT
+  unset CONTAINED_RUN_REAL_HOME_ID CONTAINED_RUN_ROOT CONTAINED_RUN_NETWORK_MODE
   exec "$@"
 fi
 
 if [ "$#" -eq 0 ]; then
-  echo "usage: $0 <command> [args...]" >&2
+  echo "usage: $0 [--allow-network] <command> [args...]" >&2
   exit 2
 fi
 
@@ -247,7 +291,25 @@ ENV_ARGS=()
 for v in "${ALLOW_VARS[@]}"; do
   [ -n "${!v+x}" ] && ENV_ARGS+=(--setenv "$v" "${!v}")
 done
-ENV_ARGS+=(--setenv CONTAINED_RUN_REAL_HOME_ID "$REAL_HOME_ID" --setenv CONTAINED_RUN_ROOT "$ROOT")
+ENV_ARGS+=(--setenv CONTAINED_RUN_REAL_HOME_ID "$REAL_HOME_ID" --setenv CONTAINED_RUN_ROOT "$ROOT" --setenv CONTAINED_RUN_NETWORK_MODE "$NETWORK_MODE")
+
+# Disposable RUNNER_TEMP staging (see "DISPOSABLE RUNNER_TEMP STAGING" above): never bind the real,
+# possibly-shared directory in - copy its current contents into a fresh disposable directory, bind
+# THAT at the real path instead, and copy the result back out (always, win or lose) once the
+# sandboxed command has exited.
+STAGE_DIR=""
+if [ -n "$RUNNER_TEMP_DIR" ]; then
+  mkdir -p "$RUNNER_TEMP_DIR"
+  STAGE_DIR="$(mktemp -d)"
+  cp -a "$RUNNER_TEMP_DIR/." "$STAGE_DIR/" 2>/dev/null || true
+fi
+cleanup_stage() {
+  if [ -n "$STAGE_DIR" ]; then
+    cp -a "$STAGE_DIR/." "$RUNNER_TEMP_DIR/" 2>/dev/null || true
+    rm -rf "$STAGE_DIR"
+  fi
+}
+trap cleanup_stage EXIT
 
 # Filesystem allowlist: nothing is visible unless bound in below. Order matters only in that a
 # later entry nested under an earlier one wins there (bwrap's own documented behaviour) - which is
@@ -265,20 +327,25 @@ BIND_ARGS=(
   --tmpfs "$REAL_HOME"
   --bind "$ROOT" "$ROOT"
 )
-if [ -n "$RUNNER_TEMP_DIR" ]; then
-  mkdir -p "$RUNNER_TEMP_DIR"
-  BIND_ARGS+=(--bind "$RUNNER_TEMP_DIR" "$RUNNER_TEMP_DIR")
+if [ -n "$STAGE_DIR" ]; then
+  BIND_ARGS+=(--bind "$STAGE_DIR" "$RUNNER_TEMP_DIR")
 fi
 if [ -n "$RUNNER_TOOL_CACHE_DIR" ]; then
   BIND_ARGS+=(--ro-bind-try "$RUNNER_TOOL_CACHE_DIR" "$RUNNER_TOOL_CACHE_DIR")
 fi
 
-exec bwrap \
-  --unshare-net \
-  --unshare-pid \
-  --die-with-parent \
+NAMESPACE_ARGS=(--unshare-pid --die-with-parent)
+if [ "$NETWORK_MODE" = "deny" ]; then
+  NAMESPACE_ARGS+=(--unshare-net)
+fi
+
+STATUS=0
+bwrap \
+  "${NAMESPACE_ARGS[@]}" \
   --clearenv \
   "${BIND_ARGS[@]}" \
   "${ENV_ARGS[@]}" \
   --chdir "$ROOT" \
-  -- "$ROOT/tools/containedRun.sh" --inside-sandbox "$@"
+  -- "$ROOT/tools/containedRun.sh" --inside-sandbox "$@" || STATUS=$?
+
+exit "$STATUS"

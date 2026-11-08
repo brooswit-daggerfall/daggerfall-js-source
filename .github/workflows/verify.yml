@@ -16,9 +16,10 @@
 # workflows; check.yml is the only remaining caller of this file.
 #
 # DFO-83/DFO-11 (not yet authorized to run): every step below that runs
-# repository code (the pins, lint, types, each shard, the build) goes
-# through tools/containedRun.sh - see that script for why. `npm ci` stays
-# outside it: dependency install needs the real registry.
+# repository or dependency code - dependency acquisition
+# (--allow-network npm ci --ignore-scripts), dependency lifecycle scripts
+# (npm rebuild), the pins, lint, types, each shard, the build - goes
+# through tools/containedRun.sh - see that script for why.
 #
 # The shard count is in two places that must agree - the matrix and the
 # `/8` - and test/tooling/flow1_ci.test.js holds them together.
@@ -94,8 +95,14 @@ jobs:
           path: node_modules
           key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
       - name: Install dependencies
+        # DFO-83/DFO-11: acquisition only (--ignore-scripts) - no lifecycle script runs with real network/HOME
         if: steps.deps.outputs.cache-hit != 'true'
-        run: npm ci
+        run: tools/containedRun.sh --allow-network npm ci --ignore-scripts
+      - name: Dependency lifecycle scripts
+        # esbuild's own postinstall is the only one present (checked every installed package.json) and needs
+        # no network on this locked tree - see tools/containedRun.sh for why; runs inside the full boundary
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: tools/containedRun.sh npm rebuild
       - name: FIRST-VISIT pins
         # src/firstVisitPins.js is generated and gitignored; this step writes it explicitly, every job, inside the
         # containment boundary - DFO-83/DFO-11: no longer npm ci's postinstall, which ran it uncontained
@@ -146,8 +153,14 @@ jobs:
           path: node_modules
           key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
       - name: Install dependencies
+        # DFO-83/DFO-11: acquisition only (--ignore-scripts) - no lifecycle script runs with real network/HOME
         if: steps.deps.outputs.cache-hit != 'true'
-        run: npm ci
+        run: tools/containedRun.sh --allow-network npm ci --ignore-scripts
+      - name: Dependency lifecycle scripts
+        # esbuild's own postinstall is the only one present (checked every installed package.json) and needs
+        # no network on this locked tree - see tools/containedRun.sh for why; runs inside the full boundary
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: tools/containedRun.sh npm rebuild
       - name: FIRST-VISIT pins
         # src/firstVisitPins.js is generated and gitignored; this step writes it explicitly, every job, inside the
         # containment boundary - DFO-83/DFO-11: no longer npm ci's postinstall, which ran it uncontained
@@ -197,8 +210,14 @@ jobs:
           path: node_modules
           key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
       - name: Install dependencies
+        # DFO-83/DFO-11: acquisition only (--ignore-scripts) - no lifecycle script runs with real network/HOME
         if: steps.deps.outputs.cache-hit != 'true'
-        run: npm ci
+        run: tools/containedRun.sh --allow-network npm ci --ignore-scripts
+      - name: Dependency lifecycle scripts
+        # esbuild's own postinstall is the only one present (checked every installed package.json) and needs
+        # no network on this locked tree - see tools/containedRun.sh for why; runs inside the full boundary
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: tools/containedRun.sh npm rebuild
       - name: FIRST-VISIT pins
         # src/firstVisitPins.js is generated and gitignored; this step writes it explicitly, every job, inside the
         # containment boundary - DFO-83/DFO-11: no longer npm ci's postinstall, which ran it uncontained
