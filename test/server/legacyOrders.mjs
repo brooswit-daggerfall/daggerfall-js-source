@@ -3,8 +3,11 @@
 // opens the order as one made before the switch: the row and its Stripe session as shopCheckout wrote them
 // (server-account/src/shop.js), with no page pressed. Live orders of the pre-alpha wares are such orders.
 import { randomBytes } from 'node:crypto';
-import { SHOP_CHECKOUT_S } from '../../server-account/src/shop.js';
-import { shopWareById, shopHeldIds, shopCreditOf, SHOP_MIN_CENTS } from '../../src/net/shopLaw.js';
+import { shopWareById, shopHeldIds, shopCreditOf, SHOP_MIN_CENTS, SHOP_CHECKOUT_MS } from '../../src/net/shopLaw.js';
+
+// DFO-84: shop.js no longer derives SHOP_CHECKOUT_S (the checkout pipeline it timed is gone) - this fixture still needs
+// the legacy page's own lifetime, straight off the law's SHOP_CHECKOUT_MS.
+const SHOP_CHECKOUT_S = SHOP_CHECKOUT_MS / 1000;
 
 /** Each item's price in US cents before AURUM-ONLY (AUDIT-STOREFRONT II's sheet) - what a page opened then charged. */
 export const LEGACY_CENTS = Object.freeze({

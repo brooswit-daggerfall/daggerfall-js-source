@@ -1048,13 +1048,8 @@ export const ROUTES = new Set([
   '/v1/patreon/confirm',
   '/v1/patreon/webhook',
   '/v1/patreon/unlink',
-  // SHOP: the shop's open doors (shop.js) - the confirm page, its press, Stripe's webhook, and the two pages Stripe sends
-  // the buyer back to; none behind a session, each proven by what it carries
-  '/v1/shop/buy',
-  '/v1/shop/checkout',
-  '/v1/shop/webhook',
-  '/v1/shop/done',
-  '/v1/shop/cancel',
+  // SHOP: DFO-84 removed the shop's five open doors (shop.js) - the confirm page, its press, Stripe's webhook, and the
+  // two pages Stripe sent the buyer back to. None is served any more.
   // ARENA4: the arena (arena.js) - a bout's receipt the relay signed, carried here by an account it names; the boards,
   // counted from the rows; a banner joined or quit. Every one behind a session; a guest reads the boards and keeps nothing.
   '/v1/arena/claim',

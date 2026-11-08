@@ -9,7 +9,6 @@ import { SHOP_WARES } from '../../src/net/shopLaw.js';
 import { shopWindow, shopBundleRows, SHOP_CSS } from '../../src/ui/enhanced/enhancedShop.js';
 import { wardrobeAvail, wardrobeEntry, availLine } from '../../src/ui/collections/wardrobeCatalogue.js';
 import { wardrobeFilterPasses, drawWardrobePart, resetWardrobePart } from '../../src/ui/collections/wardrobePart.js';
-import { shopConfirmPage } from '../../server-account/src/shop.js';
 
 function fakeDoc() {
   const doc = { activeElement: null, head: null, defaultView: null, byId: new Map() };
@@ -86,14 +85,11 @@ test('AUDIT-STOREFRONT S9 a featured window\'s tag and its days left are told on
   w.stop();
 });
 
-test('AUDIT-STOREFRONT S12, S13: a giver held in part said in a bundle\'s contents and on the confirm page; the carousel\'s dots a 24 px target each (mutants: a set whose piece is held said unowned; a 14 px dot)', () => {
+test('AUDIT-STOREFRONT S12, S13: a giver held in part said in a bundle\'s contents (DFO-84: the confirm page itself is removed, with the rest of Stripe); the carousel\'s dots a 24 px target each (mutants: a set whose piece is held said unowned; a 14 px dot)', () => {
   // PIN MOVED (PASS-PANELS): the Seasonal Collector and the Deluxe it gave are retired - a giver inside a giver is the
   // Eternal Set, its Halo held
   const rows = shopBundleRows(flowIn([row('armory:eternalhalo', { held: true, buy: null })]), { gives: ['armory:eternalset', 'kill:pyre'] });
   assert.deepEqual(rows.map((r) => [r.id, r.held, r.part]), [['armory:eternalset', false, true], ['kill:pyre', false, false]]);
-  const champion = SHOP_WARES.find((w) => w.id === 'bundle:daedricchampion');
-  const page = shopConfirmPage({ handle: 'Aelwyn', ware: champion, ticket: 't', cents: 1628, holds: 0, part: true });
-  assert.ok(page.lines.includes('Your account holds part of it already, so the price is less.'));
   assert.match(SHOP_CSS, /\.sh-cdot \{ width: 24px; height: 24px; min-width: 24px; min-height: 24px;/);
 });
 

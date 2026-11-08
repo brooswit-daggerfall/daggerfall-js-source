@@ -51,19 +51,18 @@ test('ADMIN-ALL x STOREFRONT: an admin holds the Folios\' and the shop\'s titles
   assert.deepEqual(glyphs, glyphsInOrder(glyphs), 'in the order the token\'s mask hands the room');
 });
 
-test('ADMIN-ALL x STOREFRONT: the shop holds every ware for an admin but a pack of Aurum - the card gives no Buy link but a pack\'s (mutants: a pack held, so an admin cannot buy Aurum; a ware sold to an admin)', async () => {
+test('ADMIN-ALL x STOREFRONT: the shop holds every ware for an admin but a pack of Aurum, and offers NO Buy link at all any more - DFO-84 removed the one thing a pack\'s link would have opened (mutants: a pack held, so an admin cannot buy Aurum; a ware sold to an admin)', async () => {
   for (const w of SHOP_WARES) {
     assert.equal(shopHolds(admin, env, w), !shopRepeatable(w), w.id);
     assert.equal(shopHolds(mod, env, w), false, `a moderator: ${w.id}`);
   }
-  const card = await shopCardOf(admin, { ...ON, STRIPE_SECRET_KEY: 'sk_test', STRIPE_WEBHOOK_SECRET: 'wh', SHOP_ON_SALE: SHOP_WARES.map((w) => w.id).join(',') },
-    { subtle: crypto.subtle, rand: (b) => crypto.getRandomValues(b), nowS: NOW_S, origin: 'https://x' });
+  const card = await shopCardOf(admin, { ...ON, SHOP_ON_SALE: SHOP_WARES.map((w) => w.id).join(',') }, { nowS: NOW_S });
   const packs = card.wares.filter((w) => w.id.startsWith('aurum:'));
   assert.ok(packs.length > 0 && card.wares.length > packs.length);
   for (const w of card.wares) {
     const pack = w.id.startsWith('aurum:');
     assert.equal(w.held, !pack, w.id);
-    assert.equal(!!w.buy, pack, w.id);
+    assert.equal(w.buy ?? null, null, w.id);
   }
 });
 

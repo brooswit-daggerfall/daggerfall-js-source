@@ -675,8 +675,8 @@ test('STOREFRONT the Folios\' head (PASS-PANELS): the season\'s story and its th
   assert.deepEqual(all(w.root, 'sh-cwhat').map((n) => n.textContent), ['Kill 100 foes', 'Destroy 25 Dwemer constructs', 'Gather 60 times', 'Win 3 tavern games', 'Win 1 endgame fight: a breach, a Redoubt, the Serpent, the Dwarven Dragon or a star']);   // PIN MOVED (STOREFRONT): a count's own plural (ui/passText.js, ICU)
   assert.deepEqual(all(w.root, 'sh-caurum').map((n) => n.textContent), PASS_CHALLENGES.filter((c) => c.stage === 0).map((c) => `+${c.aurum} Aurum`));
   assert.equal(all(w.root, 'sh-ccount')[0].textContent, '40 / 100');
-  assert.equal(all(w.root, 'sh-cdone').length, 1);   // PIN MOVED (AUDIT-STOREFRONT II, lane E 5): never the foot's payment line's class
-  assert.equal(all(w.root, 'sh-stripe').length, 1, 'the payment line, a class of its own');
+  assert.equal(all(w.root, 'sh-cdone').length, 1);
+  assert.equal(all(w.root, 'sh-stripe').length, 0, 'DFO-84: the foot\'s payment line is removed with Stripe');
   w.stop();
   const out = shopWindow(fakeDoc(), { flow: () => ({ stage: 'out' }), onClose() {}, focus: false, now: () => NOW, preview: async () => null, effectPreview: async () => null });
   assert.equal(all(out.root, 'sh-passwho')[0].textContent, 'Sign in with a username to buy from the Folios.');

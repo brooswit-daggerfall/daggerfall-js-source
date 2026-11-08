@@ -388,7 +388,7 @@ import {
   patreonCardOf, pledgeTitles, patreonHtml, patreonPage, patreonConfirmPage, patreonLinkedPage,
   PATREON_PAGES, PATREON_TICKET_S, PATREON_HOOK_MAX_BYTES, PATREON_CALLBACK_PATH,
 } from './patreon.js';   // PATREON-LINK: a patron's own Patreon, linked
-import { SHOP_OPEN_ROUTES, SHOP_WEBHOOK_PATH, SHOP_HOOK_MAX_BYTES, shopDoor, shopCardOf, closeStale } from './shop.js';   // SHOP: the shop's doors, and its card on the account read
+import { shopCardOf } from './shop.js';   // SHOP: DFO-84 removed its Stripe doors - its card on the account read is all that remains
 import { aurumCardOf, buyWare, AURUM_STATUS, aurumOpenFor } from './aurum.js';   // AURUM: the balance, the day's deals and a ware bought
 import { claimCache, AURUM_CACHE_STATUS } from './aurumCache.js';   // AURUM-CACHES: a cache claimed
 
@@ -975,20 +975,9 @@ const service = {
         return patreonHtml(patreonLinkedPage({ handle: row?.handle ?? '', titles: pledgeTitles(who.tiers, who.status, env), aurum: r.aurum }));
       }
 
-      // SHOP (shop.js): THE SHOP'S DOORS, no session - each proven by what it carries, answered before the JSON ladder as
-      // Patreon's. /v1/account carries `shop: { on, wares }`, each ware's `buy` the confirm page with a sealed ticket:
-      //   GET  /v1/shop/buy ?t              -> the ware, its price and the account, and the press on to pay
-      //   POST /v1/shop/checkout ticket=... -> 303 to Stripe's checkout page (an order, and its session)
-      //   POST /v1/shop/webhook <event>     -> { ok, applied }   (Stripe-Signature: HMAC-SHA256 under the endpoint's secret)
-      //   GET  /v1/shop/done ?o, /v1/shop/cancel -> the pages Stripe sends the buyer back to
-      if (SHOP_OPEN_ROUTES.has(path)) {
-        const bytes = request.method === 'POST' ? await readCapped(request, path === SHOP_WEBHOOK_PATH ? SHOP_HOOK_MAX_BYTES : MAX_BODY_BYTES) : null;
-        const r = await shopDoor(ctx, env, path, {
-          method: request.method, url, bytes: bytes ? new Uint8Array(bytes) : null, signature: request.headers.get('stripe-signature'),
-          fetch: (u, init) => globalThis.fetch(u, init), limited: () => overRate(ctx, `ip:${request.headers.get('cf-connecting-ip') || 'unknown'}`, 60),
-        });
-        return r instanceof Response ? r : 'error' in r.json ? no(r.json.error, r.status, origin) : json(r.json, r.status, origin);
-      }
+      // SHOP (shop.js): DFO-84 removed the shop's doors - the confirm page, its press, Stripe's webhook, and the two
+      // pages Stripe sent the buyer back to (/v1/shop/buy, checkout, webhook, done, cancel). None is served any more;
+      // /v1/account still carries `shop: { on: false, wares }` (shopCardOf below), each ware's `buy` always null.
 
       // GRANT2 (bible/11-Multiplayer/Spawn-Grants.md section 12): THE SPAWN GRANTS' MEASURE - a cell's window of asks,
       // posted by the relay and proven by its signature over the exact bytes (the chat feed's kind of door, grants.js)
@@ -1430,7 +1419,7 @@ const service = {
           dragonRecordOf(ctx, who.player.id), sdRecordOf(ctx, who.player.id), starRecordOf(ctx, who.player.id), ketchRecordOf(ctx, who.player.id),
           renownTracksOf(ctx, who.player.id), marksCardOf(ctx, who.player, env), withSeatTitles(ctx, who.player, env), insigniaPurse(ctx, who.player),
           devicesOf(ctx, who.player.id), patreonCardOf(who.player, env, { subtle, rand, nowS, origin: url.origin }),
-          shopCardOf(who.player, env, { subtle, rand, nowS, origin: url.origin }), passOf(ctx, who.player, env), aurumCardOf(ctx, who.player, env),
+          shopCardOf(who.player, env, { nowS }), passOf(ctx, who.player, env), aurumCardOf(ctx, who.player, env),
         ]);
         return json({
           // DUEL1: and the duelling record, counted off the results (the profile card's K/D); WB5b: and the gates closed
@@ -2453,7 +2442,8 @@ const service = {
         if (request.method !== 'POST') return no('method', 405, origin);
         const r = await buyWare(ctx, who.player, body, env);
         if ('error' in r) return json({ error: r.error, ...(Number.isSafeInteger(r.balance) ? { balance: r.balance } : {}), ...(Number.isSafeInteger(r.price) ? { price: r.price } : {}) }, AURUM_STATUS[/** @type {keyof typeof AURUM_STATUS} */ (r.error)] ?? 400, origin);
-        await closeStale(ctx, env, (u, i) => globalThis.fetch(u, i), who.player.id);   // AUDIT-STOREFRONT III A6: a money page for it left open
+        // DFO-84: this used to close a Stripe checkout page left open for the same ware (closeStale, shop.js) - there is
+        // no more money page to close, and no more reason to reach Stripe from here.
         const after = await withSeatTitles(ctx, r.row, env);
         return json({ ok: true, ware: r.ware, spent: r.spent, ...accountWardrobe(after, env, nowS), aurum: await aurumCardOf(ctx, after, env) }, 200, origin);
       }

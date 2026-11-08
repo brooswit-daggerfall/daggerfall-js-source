@@ -502,9 +502,11 @@ PATREON_CAMPAIGN_ID = ""
 # Shop.md): WHAT THE SHOP SELLS NOW - ware ids (src/net/shopLaw.js
 # SHOP_WARES), comma-separated. Every ware is pre-alpha only and "sold until
 # I dictate to remove it": take its id off and its sale ends on the next
-# deploy; those who bought it keep it. The shop takes payments only once the
-# deploy has put STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET from the
-# repository's own secrets (.github/workflows/account-deploy.yml).
+# deploy; those who bought it keep it.
+# DFO-84 (2026-11-08): the shop took payments only once the deploy had put
+# STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET from the repository's own
+# secrets - that whole payment path (server-account/src/shop.js) is removed,
+# and this Worker is never given either secret now.
 # ARMORY (2026-10-28, bible/04-Characters/Aura-Armory.md): and the Aura Armory's Eternal line, a piece a slot.
 # STOREFRONT (2026-10-29, bible/06-Systems/Storefront.md): and the sheet's wares - the kill effects, portal skins, mount
 # looks, name visuals and bundles. PASS-PANELS: the Battle Pass is no ware - its tracks are bought with Aurum.

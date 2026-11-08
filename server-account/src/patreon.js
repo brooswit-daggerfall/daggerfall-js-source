@@ -639,8 +639,10 @@ export function patreonPage({ heading, lines = [], form = null }) {
   );
 }
 
-/** A page as a Response: HTML, never cached, never framed, sending no Referer, its one form posting only here - SHOP:
- *  and on to `formTo` (Stripe's checkout), where the form's answer sends the browser, which form-action also governs. */
+/** A page as a Response: HTML, never cached, never framed, sending no Referer, its one form posting only here, or - where
+ *  a caller names one - on to `formTo`, where the form's answer sends the browser, which form-action also governs.
+ *  DFO-84: shop.js's own pages (and their `formTo` of Stripe's checkout origin) are removed; Patreon's are the only
+ *  pages left that call this. */
 export function patreonHtml(/** @type {string} */ html, status = 200, formTo = '') {
   const to = /^https:\/\/[a-z0-9.-]+$/.test(formTo) ? ` ${formTo}` : '';
   return new Response(html, {

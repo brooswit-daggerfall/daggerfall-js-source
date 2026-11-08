@@ -5,7 +5,9 @@
 // end of the pause face's row of marks opens a window in the pause window's frame: the proceeds' disclaimer first, then
 // STOREFRONT's carousel of the featured wares (2026-10-29, the owner: "a rotating panel carousel with limited featured
 // items"; bible/06-Systems/Storefront.md section 9), then a tab a section and in each a panel a ware - seen live - its
-// tier, the price it costs this account, and Buy, which opens Stripe's page. PASS-PANELS: the Folios (enhancedPass.js).
+// tier, the price it costs this account, and Buy. DFO-84 (2026-11-08): Buy no longer opens Stripe's page - the account
+// service never mints that link any more, so a ware's state (shopWareState) never resolves to it - every ware is bought
+// with Aurum instead. PASS-PANELS: the Folios (enhancedPass.js).
 import {
   SHOP_WARES,
   SHOP_CATEGORIES,
@@ -251,11 +253,12 @@ export function shopHeldAny(flow, id) {
   return false;
 }
 /**
- * WHAT A WARE'S PANEL SAYS AND OFFERS, from the flow as it stands. Pure. AURUM-ONLY: a pack's `state` 'buy' (a link to
- * follow, `cents` its money price); any other ware's 'afford' (Buy, for `price` Aurum) or 'short' (`need` more), its
- * `price` this account's (a giver's share; a quarter off on its deal day, `deal`) and `list` its own. Either: 'held',
- * 'gone' (no longer sold), 'closed' (a pack while no payments are taken, a ware while Aurum is shut), 'guest', 'out'
- * (nobody signed in), 'reading'.
+ * WHAT A WARE'S PANEL SAYS AND OFFERS, from the flow as it stands. Pure. AURUM-ONLY: a pack's `cents` its money price;
+ * any other ware's 'afford' (Buy, for `price` Aurum) or 'short' (`need` more), its `price` this account's (a giver's
+ * share; a quarter off on its deal day, `deal`) and `list` its own. Either: 'held', 'gone' (no longer sold), 'closed'
+ * (a pack, which DFO-84 left with no way to pay for it at all; a ware while Aurum is shut), 'guest', 'out' (nobody
+ * signed in), 'reading'. DFO-84: the card's own `on` is always false now, so a pack's `state` can never again resolve
+ * to 'buy' (still handled below, defensively, should a caller ever hand this a card shaped otherwise).
  * @param {any} flow @param {{ id: string, kind: string, key: string, cents: number, price: number }} ware
  */
 export function shopWareState(flow, ware) {
@@ -543,15 +546,9 @@ export function shopWindow(
   terms.href = TERMS_URL;
   terms.target = '_blank';
   terms.rel = 'noopener';
-  const paid = el(
-    'span',
-    'sh-stripe',
-    t(
-      'shop.stripe',
-      'Payments are taken by Stripe. Prices are in US dollars, and Stripe can show your own currency and ways to pay. No card details reach the game.',
-    ),
-  );
-  foot.append(who, paid, terms);
+  // DFO-84 (2026-11-08): the foot's payment line (sh-stripe, "Payments are taken by Stripe...") is removed with the
+  // rest of Stripe - there is no payment method left for it to describe.
+  foot.append(who, terms);
   // AUDIT-STOREFRONT II (lane E 6): the head, the disclaimer and the tabs stand; the featured wares and the section's
   // panels scroll under them
   const scroll = el('div', 'sh-scroll');

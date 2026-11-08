@@ -64,16 +64,17 @@ test('AURUM-ONLY the law: every ware but a pack priced in Aurum - its dollar pri
   assert.ok(withPyre !== null && withPyre < champion.price && withPyre >= SHOP_MIN_PRICE, `the Pyre held takes its share off (${withPyre})`);
 });
 
-test('AURUM-ONLY the card: every ware but a pack carries its Aurum price and no link - a deal its deal price, marked - and a pack alone carries a money link and its cents; the client reads both back (mutants: an item given a money link; the deal unmarked)', async (t) => {
+test('AURUM-ONLY the card: every ware but a pack carries its Aurum price and no link - a deal its deal price, marked; DFO-84: a pack is still told, its cents unchanged, but carries no link either any more - there is no longer a way to pay (mutants: an item given a money link; the deal unmarked; a pack given a link)', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: NOW });
   const s = await stand();
   const me = await s.registered('Reader');
   const card = await s.shop(me);
   const deals = today();
+  assert.equal(card.on, false, 'DFO-84: there is no way left to pay');
   for (const r of card.wares) {
     const w = /** @type {any} */ (shopWareById(r.id));
     if (shopRepeatable(w)) {
-      assert.match(String(r.buy), /^https:\/\/accounts\.invalid\/v1\/shop\/buy\?t=/, `${r.id}: a pack's money link`);
+      assert.equal(r.buy, null, `${r.id}: DFO-84 removed the money link`);
       assert.equal(r.cents, w.cents);
       continue;
     }
@@ -111,28 +112,26 @@ test('AURUM-ONLY a buy: any ware but a pack, for its price - a deal for its deal
   assert.deepEqual((await s.buy(me, 'glyph:oblivion')).body, { error: 'aurum-ware' }, 'a ware sold only in a bundle');
 });
 
-test('AURUM-ONLY money: an item\'s sealed ticket - one minted before the switch - opens the "Bought with Aurum" page and its press opens no checkout; a pack\'s still opens its confirm page (mutants: an item\'s page priced in money; its press asking Stripe)', async (t) => {
+test('DFO-84: the shop\'s five money doors are gone - buy, checkout, webhook, done and cancel all answer as any unknown path does, a pack\'s card carries no link to press, and nothing reaches outside this service, even with a ticket minted under the old (pre-removal) sealing scheme in hand (mutants: a door still answered; an outbound fetch; a ticket still opens a page)', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: NOW });
   const s = await stand();
   const me = await s.registered('Payer');
   const pack = (await s.shop(me)).wares.find((/** @type {any} */ r) => r.id === 'aurum:500');
-  const page = await s.fetch(pack.buy);
-  assert.equal(page.status, 200);
-  assert.match(await page.text(), /500 Aurum/, 'a pack\'s confirm page');
-  const { sealWith } = await import('../../server-account/src/sealed.js');
+  assert.equal(pack.buy, null, 'DFO-84: no link is ever minted for a pack any more');
+  const { sealWith } = await import('../../server-account/src/sealed.js'); // sealed.js itself is unrelated to Stripe and stays
   const ticket = await sealWith(ON.STRIPE_SECRET_KEY, 'daggerfall-accounts shop', 'buy', { p: me.id, w: 'kill:pyre', x: NOW / 1000 + 3600 },
     { subtle: globalThis.crypto.subtle, rand: (/** @type {Uint8Array} */ b) => globalThis.crypto.getRandomValues(b) });
-  const item = await s.fetch(`https://accounts.invalid/v1/shop/buy?t=${encodeURIComponent(ticket)}`);
-  assert.equal(item.status, 410);
-  assert.match(await item.text(), /Bought with Aurum/);
   const real = globalThis.fetch;
   let asked = 0;
-  globalThis.fetch = async () => { asked++; throw new Error('Stripe asked'); };
+  globalThis.fetch = async (...a) => { asked++; return real(...a); };
   try {
-    const press = await s.fetch('https://accounts.invalid/v1/shop/checkout', { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ticket }).toString() });
-    assert.equal(press.status, 400);
-    assert.match(await press.text(), /Bought with Aurum/);
+    for (const path of ['/v1/shop/buy?t=x', '/v1/shop/checkout', '/v1/shop/webhook', '/v1/shop/done', '/v1/shop/cancel']) {
+      const r = await s.fetch(`https://accounts.invalid${path}`, { method: path === '/v1/shop/buy?t=x' ? 'GET' : 'POST' });
+      assert.equal(r.status, 404, `${path}: no longer served`);
+    }
+    const withTicket = await s.fetch(`https://accounts.invalid/v1/shop/buy?t=${encodeURIComponent(ticket)}`);
+    assert.equal(withTicket.status, 404, 'a sealed ticket from before the removal opens nothing - there is no door left to read it');
   } finally { globalThis.fetch = real; }
-  assert.equal(asked, 0, 'Stripe never asked for an item');
+  assert.equal(asked, 0, 'none of those six requests ever reached outside this service - there is no code path left that could');
   assert.equal(s.raw.prepare('SELECT COUNT(*) AS n FROM shop_orders WHERE player = ?').get(me.id).n, 0, 'no order written');
 });

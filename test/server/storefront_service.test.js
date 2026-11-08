@@ -2,16 +2,15 @@
 // The service's side of the storefront, driven end to end through the real Worker on node:sqlite (test/accountDb.mjs): a
 // bundle's price for an account that holds part of it and its grant, the launch windows and a limited ware, the effects
 // worn and refused, the pass's finds - their Aurum under the day's bound, the stage's challenges paid once - and the
-// shop's demand read. Stripe is stood in for, as the SHOP tests stand it. PASS-PANELS: the tracks' own are
-// test/server/passpanels_service.test.js.
+// shop's demand read. PASS-PANELS: the tracks' own are test/server/passpanels_service.test.js.
+// DFO-84 (2026-11-08): Stripe (its checkout, its webhook, fulfilOrder) is removed; the demand test below now marks its
+// legacy money orders paid directly, on the row, rather than through the removed webhook.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import { standService } from '../accountDb.mjs';
 import { legacyOrder } from './legacyOrders.mjs';   // AURUM-ONLY: an item's money order, made before the switch
-import { fulfilOrder, shopCardOf, STRIPE_API } from '../../server-account/src/shop.js';
 import { shopDemand, DEMAND_DAYS_MAX } from '../../server-account/src/staffShop.js';
 import { dailyWaresAt, dailySaleOf } from '../../server-account/src/aurum.js';   // AURUM: the day's wares beside the demand
 import { passOf, findPass, BATTLE_PASS_STATUS, passSwitchOf } from '../../server-account/src/battlePass.js';
@@ -25,43 +24,31 @@ import {
 import { PASS_DAY_AURUM, PASS_DAY_ASKS, PASS_CHALLENGES, passSeasonById, passCardOf } from '../../src/net/battlePassLaw.js';
 
 const SOLD = SHOP_WARES.filter((w) => w.alone);
-const ON = { STRIPE_SECRET_KEY: 'sk_test_sf', STRIPE_WEBHOOK_SECRET: 'whsec_sf', SHOP_ON_SALE: SOLD.map((w) => w.id).join(','), PASS_OPEN: 'on', AURUM_OPEN: 'on' };
+const ON = { SHOP_ON_SALE: SOLD.map((w) => w.id).join(','), PASS_OPEN: 'on', AURUM_OPEN: 'on' };
 const S1 = passSeasonById('s1');
 const IN_TREMOR = S1.fromMs + 3 * 86_400_000 + 3_600_000;   // the first stage's fourth day
 const BEFORE = S1.tracksFromMs - 86_400_000;
 
-let sessions = 0;   // a session id Stripe never gives twice (the column is UNIQUE: a stand-in counting from one each call broke a second order)
-function stripe() {
-  const real = globalThis.fetch;
-  globalThis.fetch = async (url) => {
-    if (String(url) === STRIPE_API) { const n = ++sessions; return Response.json({ id: `cs_sf_${n}`, url: `https://checkout.stripe.com/c/pay/cs_sf_${n}` }); }
-    throw new Error(`no stand-in for ${url}`);
-  };
-  return { restore: () => { globalThis.fetch = real; } };
-}
 async function stand(extra = ON) {
   const s = await standService(extra);
   const get = (path, who) => s.fetch(`https://accounts.invalid${path}`, { headers: { authorization: `Bearer ${who.secret}` } });
   const post = async (path, who, body) => { const r = await s.fetch(`https://accounts.invalid${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${who.secret}` }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
   const account = async (who) => (await get('/v1/account', who)).json();
-  const press = (ticket) => s.fetch('https://accounts.invalid/v1/shop/checkout', { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ticket }).toString() });
-  const ticketOf = async (who, id) => new URL((await account(who)).shop.wares.find((w) => w.id === id).buy).searchParams.get('t');
   const raw = s.env.DB._raw;
   const rowOf = (who) => raw.prepare('SELECT shop_wares, shop_held, effects, pass_items FROM players WHERE id = ?').get(who.id);
   const orders = (who) => raw.prepare('SELECT * FROM shop_orders WHERE player = ? ORDER BY created_at').all(who.id);
-  // AURUM-ONLY (PIN MOVED): an item's money order is one made before the switch, paid at its old cents
-  const pay = async (who, id, cents) => {
+  // AURUM-ONLY (PIN MOVED): an item's money order is one made before the switch, paid at its old cents. DFO-84: Stripe's
+  // webhook (and fulfilOrder, which it alone called) is removed - the row is simply marked paid, as the webhook would
+  // have left it, for shopDemand's own read below to count.
+  const pay = (who, id, cents) => {
     const o = legacyOrder(raw, who, id, { cents });
-    return fulfilOrder({ db: s.env.DB, nowS: Math.floor(Date.now() / 1000) }, o.id, { intent: `pi_${o.id}`, amount: o.cents, currency: 'usd' });
+    raw.prepare("UPDATE shop_orders SET status = 'paid', paid_at = ?2, payment_intent = ?3 WHERE id = ?1").run(o.id, Math.floor(Date.now() / 1000), `pi_${o.id}`);
+    return o;
   };
   /** AURUM-ONLY: Aurum given (a cache's line), and a ware bought with it in the window's way - at `price` if the page said one. */
   const gift = (who, n) => raw.prepare("INSERT INTO aurum_ledger (account, kind, ref, amount, day, at) VALUES (?, 'cache', ?, ?, 0, 0)").run(who.id, `gift-${n}-${Math.random()}`, n);
   const buy = (who, ware, price) => post('/v1/aurum/buy', who, { ware, ...(price === undefined ? {} : { price }) });
-  const hook = (object) => {
-    const body = JSON.stringify({ id: 'evt_sf', type: 'checkout.session.completed', data: { object } }), t = Math.floor(Date.now() / 1000);
-    return s.fetch('https://accounts.invalid/v1/shop/webhook', { method: 'POST', body, headers: { 'content-type': 'application/json', 'stripe-signature': `t=${t},v1=${createHmac('sha256', ON.STRIPE_WEBHOOK_SECRET).update(`${t}.${body}`).digest('hex')}` } });
-  };
-  return { ...s, get, post, account, ticketOf, rowOf, orders, pay, gift, buy, hook, raw, press, stripe };
+  return { ...s, get, post, account, rowOf, orders, pay, gift, buy, raw };
 }
 
 // ── THE LAW ─────────────────────────────────────────────────────────
