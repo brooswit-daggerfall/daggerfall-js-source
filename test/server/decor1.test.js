@@ -351,9 +351,6 @@ test('DECOR1 the client\'s door: every call rides the one session as a Bearer he
     assert.equal(typeof REFUSALS[w], 'string', `${w} has its sentence`);
   }
   assert.match(REFUSALS['decor-cap'], /This room holds as many pieces as it can/);   // PIN MOVED (DECOR-ROOMY, FIELD BUGS 2026-10-29f): each room has its own cap, which the bar says
-  const wf = src('.github/workflows/account-deploy.yml');
-  assert.match(wf, /- "src\/net\/decorLaw\.js"/);
-  assert.match(wf, /\$base\/v1\/homes\/decor"/);
   assert.match(wf, /grep -q '"homes-need-account"' \/tmp\/place\.json/);
 });
 

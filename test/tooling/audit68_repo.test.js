@@ -1,7 +1,10 @@
 // AUDIT 68 (2026-09-24), cluster "repo": the house around the code - the
-// release workflow's gate and tag, the dev server's data door, the build's
-// page list, the lab's frame, the lint's reach, the runner's glob and the
-// CDN scripts' integrity. Each pin failed on the tree before its fix.
+// dev server's data door, the build's page list, the lab's frame, the
+// lint's reach, the runner's glob and the CDN scripts' integrity. Each pin
+// failed on the tree before its fix.
+// DFO-83 (2026-11-07): the X2-release-red-suite-ships and X2-release-tag-commit
+// findings, about release-desktop.yml's own gate/tag text, were removed along
+// with that workflow with the rest of the inherited operational automation.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -15,42 +18,6 @@ import { testFiles } from '../../tools/testShards.mjs';   // FAST-SUITE: npm tes
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (p) => readFileSync(join(root, p), 'utf8');
 const tracked = (spec) => execFileSync('git', ['ls-files', spec], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean);
-
-test('AUDIT 68 X2-release-red-suite-ships: the suite is a JOB every packaging leg needs, not a step inside one leg', () => {
-  const wf = read('.github/workflows/release-desktop.yml');
-  const jobs = wf.slice(wf.indexOf('\njobs:\n'));
-  const job = (name) => {
-    const at = jobs.indexOf(`\n  ${name}:\n`);
-    assert.ok(at >= 0, `release-desktop has a ${name} job`);
-    const rest = jobs.slice(at + 1);
-    const end = rest.slice(1).search(/\n {2}[A-Za-z0-9_-]+:\n/);
-    return end < 0 ? rest : rest.slice(0, end + 1);
-  };
-  const gate = job('gate'), build = job('build');
-  // PIN MOVED (REL-FAST, Mac: "Yes, thats insanely slow"): the whole house check as verify.yml's parallel jobs - lint and
-  // the types, every shard, the build - on the commit the legs build, not `npm run check` in series
-  assert.match(gate, /\n {4}uses: \.\/\.github\/workflows\/verify\.yml\n {4}with:\n {6}ref: \$\{\{ github\.sha \}\}\n/, 'the gate job runs the whole house check');
-  assert.doesNotMatch(gate, /build: false/, 'the build is a part of it, as it was of `npm run check`');
-  // REL4: and for the one number, which the `version` job resolves once
-  assert.match(build, /^ {4}needs: \[version, gate\]$/m, 'every OS leg waits for the suite before it packages anything');
-  assert.match(job('publish'), /^ {4}needs: \[version, build\]$/m, 'and nothing is attached before every leg has passed');
-  assert.doesNotMatch(build, /npm run check/, 'the check is not a step one leg carries and two legs skip');
-  assert.doesNotMatch(build, /if: matrix\.os/, 'every leg builds the site the same way');
-});
-
-test('AUDIT 68 X2-release-tag-commit: a new release tag is cut at the built commit, and the dispatch input is data, not script', () => {
-  const wf = read('.github/workflows/release-desktop.yml');
-  // REL4: the one step that attaches anything is the publish job's draft
-  const attach = wf.slice(wf.indexOf('- name: Stage the release as a draft, every file attached'), wf.indexOf('- name: Publish it whole'));
-  // PIN MOVED (REL8): the release is named for the player's update (comments between) - the tag and the commit as ever
-  assert.match(attach, /\n {10}tag_name: \$\{\{ needs\.version\.outputs\.tag \}\}\n(?: {10}#[^\n]*\n)* {10}name: \$\{\{ needs\.version\.outputs\.update != '' && format\('Update \{0\}', needs\.version\.outputs\.update\) \|\| needs\.version\.outputs\.tag \}\}\n {10}target_commitish: \$\{\{ steps\.host\.outputs\.target \}\}\n/,
-    'without target_commitish GitHub cuts the tag at main\'s head at upload time');
-  const uses = wf.split('\n').filter((l) => l.includes('${{ inputs.release_tag }}'));
-  assert.ok(uses.length > 0, 'the input is still read');
-  for (const line of uses) {
-    assert.match(line, /^ +RELEASE_TAG: \$\{\{ inputs\.release_tag \}\}$/, `read through env, never pasted into bash: ${line.trim()}`);
-  }
-});
 
 /** The dev server's arena2 middleware over a fake ARENA2 folder - its three mounts. */
 async function devMounts(fake) {

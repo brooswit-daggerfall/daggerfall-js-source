@@ -8,13 +8,12 @@
 # types, the suite in shards balanced by recorded times (eight - CI-FAST)
 # (tools/testShards.mjs - every test file in exactly one shard), and the
 # build. Nothing is skipped and nothing is weaker: every file still runs,
-# every part must pass. The PR's check (check.yml) and the deploy
-# (deploy.yml) both call it, so they cannot drift apart.
+# every part must pass. The PR's check (check.yml) calls it, so a pull
+# request and the committed main stay checked the same way.
 #
-# REL-FAST (2026-10-15): the desktop release's gate calls it too
-# (release-desktop.yml), so the release waits on the same parallel check
-# rather than `npm run check` in series - and no checkout here keeps a
-# token in .git/config (AUDIT INSTALL L1-1's law for that workflow).
+# DFO-83 (2026-11-07): the obsolete deploy.yml and release-desktop.yml
+# callers were removed with the rest of the inherited operational
+# workflows; check.yml is the only remaining caller of this file.
 #
 # The shard count is in two places that must agree - the matrix and the
 # `/8` - and test/tooling/flow1_ci.test.js holds them together.
@@ -32,7 +31,7 @@
 # (`npm run test:times`, hours) and so rarely that 1,327 files stood at the
 # median. Now every shard records each of its files' wall time (`--record`,
 # tools/fileTimes.mjs) and keeps it as an artifact; after a green run
-# test-times.yml (check.yml and deploy.yml call it, beside the result, so
+# test-times.yml (check.yml calls it, beside the result, so
 # no check waits on it) merges the eight onto the times the run was split
 # by and saves them in the Actions cache. `times` finds the newest saved
 # times (a lookup, nothing downloaded) and every shard restores THAT ONE
@@ -42,8 +41,8 @@
 #
 # EG6a (2026-10-12): and THE COURSE SWEEP - every Elite Breach course crossed
 # step by step by the real player motor, `sweep` seeds a band (25 here;
-# relay-deploy.yml asks 500), in eg-sweep.yml's four band jobs beside the
-# shards (six parts a band past a hundred seeds - SWEEP-FAST).
+# a manual eg-sweep.yml dispatch asks 500), in eg-sweep.yml's four band jobs
+# beside the shards (six parts a band past a hundred seeds - SWEEP-FAST).
 # test/tooling/eg6a_sweep.test.js holds the wiring.
 name: verify
 
@@ -55,11 +54,11 @@ on:
         type: string
         default: ""
       build:
-        description: Run the build as a part (the deploy builds its own site).
+        description: Run the build as a part of the check.
         type: boolean
         default: true
       sweep:
-        description: Seeds a band the course sweep crosses with the real motor (eg-sweep.yml) - 25 on a pull request, 500 before a relay deploy.
+        description: Seeds a band the course sweep crosses with the real motor (eg-sweep.yml) - 25 on a pull request, 500 on a manual eg-sweep.yml dispatch.
         type: number
         default: 25
     outputs:
@@ -78,7 +77,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
-          persist-credentials: false   # REL-FAST: nothing here pushes - the release's gate too (AUDIT INSTALL L1-1)
+          persist-credentials: false   # REL-FAST: nothing here pushes
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -129,7 +128,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
-          persist-credentials: false   # REL-FAST: nothing here pushes - the release's gate too (AUDIT INSTALL L1-1)
+          persist-credentials: false   # REL-FAST: nothing here pushes
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -179,7 +178,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
-          persist-credentials: false   # REL-FAST: nothing here pushes - the release's gate too (AUDIT INSTALL L1-1)
+          persist-credentials: false   # REL-FAST: nothing here pushes
       - uses: actions/setup-node@v4
         with:
           node-version: 22

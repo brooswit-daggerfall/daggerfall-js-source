@@ -102,65 +102,8 @@ test('REL7: the renotes command, spawned as release-notes.yml spawns it - from m
   }
 });
 
-/** A step's `run: |` block, by its name, as the runner hands it to bash. */
-function runBlock(yml, stepName) {
-  const at = yml.indexOf(`- name: ${stepName}\n`);
-  assert.ok(at >= 0, `no step named "${stepName}"`);
-  const from = yml.indexOf('run: |\n', at) + 'run: |\n'.length;
-  const lines = [];
-  for (const line of yml.slice(from).split('\n')) {
-    if (line.trim() && !line.startsWith('          ')) break;
-    lines.push(line.slice(10));
-  }
-  return lines.join('\n');
-}
-
-test('REL7: the workflow - by hand with a tag, or ON ITS OWN when a merged pull request\'s description is edited; main\'s code only, never the pull request\'s; the first release that brought it; the body patched and nothing else', { skip: process.platform === 'win32' && 'the steps are bash' }, () => {
-  const wf = rd('.github/workflows/release-notes.yml');
-  assert.match(wf, /\non:\n {2}workflow_dispatch:\n {4}inputs:\n {6}tag:\n[\s\S]*?\n {2}pull_request_target:\n {4}types: \[edited\]\n\n/, 'by hand, and on a description edited');
-  assert.doesNotMatch(wf, /\n {2}(push|pull_request|schedule|release):/, 'no other trigger');
-  assert.match(wf, /\n {4}if: github\.event_name == 'workflow_dispatch' \|\| \(github\.event\.pull_request\.merged && github\.event\.changes\.body && github\.event\.pull_request\.base\.ref == github\.event\.repository\.default_branch\)\n/,
-    'an open pull request, a title edited, a merge into another branch: nothing');
-  assert.match(wf, /\npermissions:\n {2}contents: read\n/, 'the workflow reads; only its job writes');
-  assert.match(wf, /\n {4}permissions:\n {6}contents: write {8}# the release's body\n {6}pull-requests: read {4}# /);
-  assert.match(wf, /- uses: actions\/checkout@v4\n {8}with:\n {10}ref: \$\{\{ github\.event\.repository\.default_branch \}\}\n {10}fetch-depth: 0 .*\n {10}persist-credentials: false /, 'main, every tag, no token left behind');
-  assert.doesNotMatch(wf, /pull_request\.head|head_ref|refs\/pull/, 'a pull request\'s code is never checked out under this token');
-  for (const step of ['The release to write', 'Write the notes again']) assert.doesNotMatch(runBlock(wf, step), /\$\{\{/, `${step}: nothing from the event is pasted into a script - only the environment carries it`);
-  // "The release to write", run as the runner runs it, in a repository with releases
-  const pick = runBlock(wf, 'The release to write');
-  const repo = mkdtempSync(join(tmpdir(), 'rel7-wf-'));
-  const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
-  try {
-    git('init', '-q', '-b', 'main');
-    git('config', 'user.email', 'p@example.invalid');
-    git('config', 'user.name', 'p');
-    git('config', 'commit.gpgsign', 'false');
-    const commit = (msg) => { writeFileSync(join(repo, 'f.txt'), `${msg}\n`); git('add', '-A'); git('commit', '-q', '-m', msg); return git('rev-parse', 'HEAD'); };
-    commit('start');
-    git('tag', 'app-v0.1.8');
-    const merged = commit('Merge pull request #547: silver');
-    commit('more');
-    git('tag', 'app-v0.1.10');   // a version sort, not a text sort: 0.1.9 comes before 0.1.10
-    git('tag', 'app-v0.1.9', merged);
-    const unreleased = commit('Merge pull request #560: not yet released');
-    const run = (env) => {
-      const out = join(repo, `out-${Math.random()}`);
-      writeFileSync(out, '');
-      const r = spawnSync('bash', ['-eo', 'pipefail', '-c', pick], { cwd: repo, env: { PATH: process.env.PATH, GITHUB_OUTPUT: out, INPUT_TAG: '', MERGE_SHA: '', PR: '', ...env }, encoding: 'utf8' });
-      return { status: r.status, stdout: r.stdout, out: readFileSync(out, 'utf8') };
-    };
-    assert.deepEqual(run({ MERGE_SHA: merged, PR: '547' }), { status: 0, stdout: '', out: 'tag=app-v0.1.9\n' }, 'the FIRST release its merge is in');
-    const notYet = run({ MERGE_SHA: unreleased, PR: '560' });
-    assert.equal(notYet.status, 0, 'no release yet is nothing to do, not a failure');
-    assert.equal(notYet.out, '', 'and no tag is written');
-    assert.match(notYet.stdout, /no release carries #560 yet/);
-    assert.deepEqual(run({ INPUT_TAG: 'app-v0.1.5767' }), { status: 0, stdout: '', out: 'tag=app-v0.1.5767\n' }, 'by hand, the tag given');
-    for (const bad of ['app-v0.1', 'v0.1.5767', 'app-v1.2.3";touch${IFS}x;"', 'app-v1.2.3\nmain']) assert.equal(run({ INPUT_TAG: bad }).status, 1, JSON.stringify(bad));
-  } finally { rmSync(repo, { recursive: true, force: true }); }
-  assert.match(wf, /- name: Write the notes again\n {8}if: steps\.release\.outputs\.tag != ''\n/, 'no release, no write');
-  const write = runBlock(wf, 'Write the notes again');
-  assert.match(write, /^GH_TOKEN="\$HOST_TOKEN" gh api "repos\/\$RELEASE_REPO\/releases\/tags\/\$TAG" > release\.json$/m);
-  assert.match(write, /^node scripts\/desktopRelease\.mjs renotes "\$TAG" current-body\.md > release-notes\.md$/m);
-  assert.match(write, /^GH_TOKEN="\$HOST_TOKEN" gh api -X PATCH "repos\/\$RELEASE_REPO\/releases\/\$ID" -F body=@release-notes\.md --silent$/m);
-  assert.doesNotMatch(write, /assets|upload|DELETE|git checkout/i, 'only the text: no file of a published release is touched (AUDIT INSTALL L3-2), and main\'s script runs');
-});
+// DFO-83 (2026-11-07): REL7's workflow test (the by-hand/on-description-edit wiring of
+// .github/workflows/release-notes.yml) was removed with the workflow itself. That workflow used
+// `pull_request_target` and was the specific hazard flagged for the inherited-operational-Actions cleanup -
+// opening a pull request that deleted it could still have run old main's copy. The `desktopRelease.mjs renotes`
+// logic it called is still covered by the test above.

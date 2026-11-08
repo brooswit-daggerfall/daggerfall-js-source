@@ -87,23 +87,14 @@ test('DA7: the shell - the updater downloads on its own, installs on quit, never
   assert.match(loud, /Could not check for updates/, 'unreachable is reported out loud, as DA6 does');
 });
 
-test('DA7: the build - a publish PROVIDER (so latest.yml and app-update.yml are written), the updater a RUNTIME dependency, and the workflow attaches the metadata beside the installers', () => {
+test('DA7: the build - a publish PROVIDER (so latest.yml and app-update.yml are written), the updater a RUNTIME dependency', () => {
+  // DFO-83 (2026-11-07): this test's workflow half (release-desktop.yml attaching the manifests and
+  // blockmaps beside the installers in one publish job) was removed with that workflow.
   const pkg = JSON.parse(read('app/package.json'));
   assert.deepEqual(pkg.build.publish, [{ provider: 'github', owner: 'Lattymoy', repo: 'daggerfall-js-source' }],
     'the provider names the repo the notice already reads; without a provider electron-builder writes no update metadata at all');
   assert.ok(pkg.dependencies?.['electron-updater'], 'a runtime dependency - electron-builder packs `dependencies`, never devDependencies');
   assert.ok(!pkg.devDependencies?.['electron-updater']);
-  const wf = read('.github/workflows/release-desktop.yml');
-  assert.match(wf, /run: npx electron-builder --publish never/, 'electron-builder uploads nothing itself; the publish job does');
-  // REL4: a leg hands its files on (the run artifact), and ONE publish job attaches everything handed on
-  const handOn = wf.slice(wf.indexOf('- name: Hand the installers on'), wf.indexOf('\n  publish:'));
-  assert.match(handOn, /app\/release\/latest\*\.yml/, 'latest.yml and latest-linux.yml ride with the installers');
-  assert.match(handOn, /app\/release\/\*\.blockmap/, 'and the blockmaps, or every update is a full download');
-  const publish = wf.slice(wf.indexOf('\n  publish:'));
-  assert.match(publish, /files: release\/\*/, 'the release carries every file the legs handed on');
-  assert.match(publish, /node scripts\/desktopRelease\.mjs check release/, 'and publishes nothing when a manifest or blockmap is missing');
-  // the tag shape the updater resolves: releases/latest's tag_name, whatever its prefix - DA6's parser is the same shape
-  assert.match(wf, /TAG="app-v\$\{BASE\}\.\$\(git rev-list --count HEAD\)"/, 'REL3\'s tag is what the updater downloads latest.yml under');
 });
 
 test('DA7: DA6 stands under it - the notice is the fallback, not a casualty', () => {

@@ -2,14 +2,14 @@
 // THE ROLLBACK FROM ACTIONS, driven over the real account service: every migration, the real checkpoint and its judge,
 // and the review's own act (server-account/src/review.js reviewAct) run through tools/lib/wranglerBindings.mjs, whose
 // wrangler is answered here by the service's own database and bucket - so every statement the act binds is written as a
-// literal and run against the real schema, as the workflow's wrangler runs it. What it holds:
+// literal and run against the real schema, as an operator's wrangler runs it by hand. What it holds:
 //   - a purse a counter's sale wrapped below nothing: the dry run is the act whole with nothing written, the apply is the
 //     record back to its last clean save - the pieces sold, the letters, the purse - its hold lifted, its seat taken,
 //     the staff finding naming who and the run, and the save rolled away dropped;
 //   - THE CHECK: a purse set at nothing after the wrap makes a later save clean - the run refuses, writing nothing;
 //   - the act's own refusals said before anything is written (service-moved, not-developer), the pick (the one
 //     character, `which`, `not-theirs`, none), and a guarded write that moved nothing (`changes()` read, not assumed);
-//   - the bindings' literals and their R2 word for a missing key; the toml's names; the workflow by hand, dry by default.
+//   - the bindings' literals and their R2 word for a missing key; the toml's names.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
@@ -325,18 +325,9 @@ test('PURSE-BACK the bindings: a statement\'s binds written as literals outside 
   }
 });
 
-test('PURSE-BACK the config and the workflow: the database, the bucket and the developers\' list read off the service\'s own wrangler.toml; the workflow by hand, a dry run by default, its inputs as environment, its actor the act\'s, in the deploy\'s queue, the page written whatever the act answers (mutants: apply by default; an input spliced; the actor typed)', () => {
+// DFO-83 (2026-11-07): .github/workflows/realm-rollback.yml, which used to run tools/realmRollback.mjs by hand from a
+// workflow_dispatch, was removed with the rest of the inherited operational workflows; its contract assertions went
+// with it - the config read off server-account/wrangler.toml below is independent of that workflow and stays.
+test('PURSE-BACK the config: the database, the bucket and the developers\' list read off the service\'s own wrangler.toml', () => {
   assert.deepEqual(CONFIG, { database: 'daggerfall-accounts', bucket: 'daggerfall-saves', developers: /^DEVELOPER_HANDLES = "([^"]*)"$/m.exec(src('server-account/wrangler.toml'))[1] });
-  const wf = src('.github/workflows/realm-rollback.yml');
-  assert.match(wf, /on:\n  workflow_dispatch:/);
-  assert.match(wf, /      apply:\n        description: [^\n]*\n        required: true\n        default: false/);
-  assert.doesNotMatch(wf, /run: [^\n]*\$\{\{ inputs\./, 'an input spliced into a run line');
-  for (const step of wf.split('\n      - ').filter((s) => /\n {8}run: \|/.test(s))) assert.doesNotMatch(step, /\$\{\{/, 'nothing spliced into a script');
-  assert.match(wf, /HANDLE: \$\{\{ inputs\.handle \}\}\n {6}CHARACTER: \$\{\{ inputs\.character \}\}\n {6}APPLY: \$\{\{ inputs\.apply \}\}/);
-  assert.match(wf, /if \[ "\$APPLY" = "true" \]; then flags="--apply"; fi/);
-  assert.match(wf, /node \.\.\/tools\/realmRollback\.mjs --handle "\$HANDLE" --character "\$CHARACTER" --by "\$GITHUB_ACTOR" --run "\$GITHUB_RUN_ID" --summary "\$RUNNER_TEMP\/summary\.md" \$flags \|\| status=\$\?/);
-  assert.match(wf, /if \[ -s "\$RUNNER_TEMP\/summary\.md" \]; then cat "\$RUNNER_TEMP\/summary\.md" >> "\$GITHUB_STEP_SUMMARY"; fi\n {10}exit \$status/);
-  assert.match(wf, /- name: Roll the character back\n {8}working-directory: server-account/);
-  assert.match(wf, /group: account-deploy\n {2}cancel-in-progress: false/);
-  assert.match(wf, /permissions:\n {2}contents: read/);
 });

@@ -674,5 +674,6 @@ test('SCHOOLS5 THE JUDGE: a save\'s path a table holds with both its schools mas
   assert.deepEqual(codes({ ...save, spells: [{ ...signatureSpell('necromancer'), index: -1 }] }), []);
   assert.ok(judgeSave(save).findings.every((f) => f.code !== 'path'));
   assert.ok(judgeSave({ ...save, arcanePath: 'archlich' }).findings.some((f) => f.code === 'path'), 'the judge asks the law');
-  assert.match(src('.github/workflows/account-deploy.yml'), /- "src\/systems\/arcanePaths\.js"/, 'the law joins the deploy\'s filter');
+  // DFO-83 (2026-11-07): the deploy-path check (account-deploy.yml bundling src/systems/arcanePaths.js) was
+  // removed with that workflow.
 });

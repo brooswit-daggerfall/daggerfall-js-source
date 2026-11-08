@@ -387,5 +387,4 @@ test('AUDIT EG IV lane3 #17 THE PUBLIC LIVE DOOR ASKS THE HUB ONE ASK AT A TIME 
 // ── lane3 #19 ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 test('AUDIT EG IV lane3 #19 THE HOLD AS RECORDED (section 22; EG-H2\'s departure 2): the deploy never asks a room to hold - an unauthenticated ask would let anyone freeze a breach - and the page says each room holds itself as it wakes; the relay keeps no door a deploy could ask it on (mutants: the old sentence)', () => {
   assert.doesNotMatch(rd('src/net/eliteGates/egDurable.js'), /EG_INTERNAL_HOLD/);
-  assert.doesNotMatch(rd('.github/workflows/relay-deploy.yml'), /internal\/eg\/hold/);
 });

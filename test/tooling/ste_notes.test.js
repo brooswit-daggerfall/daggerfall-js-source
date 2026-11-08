@@ -2,12 +2,14 @@
 // ASD-STE100 Simplified Technical English (STE)") - A PULL REQUEST'S PATCH
 // NOTES ARE WRITTEN IN STE. scripts/steNotes.mjs reads a description's notes
 // as the release reads them (patchNotesOf) and reports each place they break
-// a rule of STE a machine can read; .github/workflows/ste-notes.yml runs it
-// on every description. Each rule is pinned both ways here: a sentence that
-// breaks it is found, and its STE twin is clean.
+// a rule of STE a machine can read. Each rule is pinned both ways here: a
+// sentence that breaks it is found, and its STE twin is clean.
+// DFO-83 (2026-11-07): .github/workflows/ste-notes.yml, which used to run this
+// check on every pull request description, was removed with the rest of the
+// inherited operational workflows; its contract test went with it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, writeFileSync, rmSync, cpSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -132,33 +134,4 @@ test('STE-NOTES: the check runs as a program - 1 with the findings named, 0 when
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test('STE-NOTES: the pull request\'s ste-notes check reads every description - opened, edited, pushed - as data, with a read-only token', () => {
-  const wf = rd('.github/workflows/ste-notes.yml');
-  assert.match(wf, /\non:\n {2}pull_request:\n {4}types: \[opened, edited, reopened, synchronize\]\n/, 'an edited description is read again');
-  assert.doesNotMatch(wf.replace(/^\s*#.*$/gm, ''), /pull_request_target/, 'the pull request\'s own script, never with the repository\'s token');
-  assert.match(wf, /\npermissions:\n {2}contents: read\n/);
-  assert.match(wf, /persist-credentials: false/);
-  assert.match(wf, /\n {10}DESCRIPTION: \$\{\{ github\.event\.pull_request\.body \}\}\n/, 'the description reaches the script through the environment');
-  assert.equal(wf.match(/\$\{\{ github\.event\.pull_request\.body \}\}/g).length, 1, 'and is pasted nowhere else');
-  assert.match(wf, /\n {10}set -o pipefail\n[\s\S]*node scripts\/steNotes\.mjs "\$RUNNER_TEMP\/description\.md" \| tee -a "\$GITHUB_STEP_SUMMARY"\n/,
-    'a finding fails the step through the tee');
-  // the job checks out only what its sparse list names - and the check runs from that alone
-  const sparse = /\n {10}sparse-checkout: \|\n((?: {12}\S+\n)+)/.exec(wf)?.[1].trim().split(/\s+/) ?? [];
-  assert.ok(sparse.includes('scripts'), 'the sparse checkout holds the check');
-  const dir = mkdtempSync(join(tmpdir(), 'ste-sparse-'));
-  try {
-    for (const d of sparse) cpSync(fileURLToPath(new URL(`../../${d}`, import.meta.url)), join(dir, d), { recursive: true });
-    writeFileSync(join(dir, 'd.md'), pr('- Picking a lock is a game.'));
-    const got = spawnSync(process.execPath, [join(dir, 'scripts/steNotes.mjs'), join(dir, 'd.md')], { encoding: 'utf8' });
-    assert.equal(got.status, 1, `a sparse checkout runs the check: ${got.stderr}`);
-    assert.match(got.stdout, /"Picking" is an -ing form/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-  // the template tells the writer the law before the check does
-  const template = rd('.github/pull_request_template.md');
-  assert.match(template, /ASD-STE100 Simplified Technical English/);
-  assert.match(template, /scripts\/steNotes\.mjs/);
 });

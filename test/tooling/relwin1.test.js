@@ -45,10 +45,9 @@ test('REL2 the NSIS installer is the assisted kind and lets the player choose th
   assert.equal(b.nsis.perMachine, false, 'per-user: no elevation, and the saves folder is the user\'s');
 });
 
-test('REL2 the release attaches every exe the Windows leg wrote, and the update check still reads the TAG, never an asset name', () => {
-  const wf = rd('.github/workflows/release-desktop.yml');
-  assert.match(wf, /app\/release\/\*\.exe/, 'both Windows artifacts ride the same glob');
-  assert.doesNotMatch(wf, /-setup\.exe|-portable\.exe/, 'the workflow names no single exe');
+test('REL2 the update check still reads the TAG, never an asset name', () => {
+  // DFO-83 (2026-11-07): this test's workflow-glob half (release-desktop.yml attaching both Windows
+  // exes under the same glob) was removed with that workflow.
   const main = rd('app/main.cjs');
   assert.doesNotMatch(main, /win-x64\.exe|-setup\.exe|-portable\.exe/, 'the shell never names a download file');
 });

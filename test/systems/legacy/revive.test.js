@@ -8,10 +8,6 @@
 //   - the workflow (.github/workflows/realm-revive.yml) holds the shape realm-restore.yml proved.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { d1 } from '../../accountDb.mjs';
 import { putLineage, realmDie } from '../../../server-account/src/legacy.js';
 import { inheritHome } from '../../../server-account/src/homes.js';
@@ -24,7 +20,6 @@ import { mergeFamily } from '../../../src/scenes/legacyHost.js';
 import { query, playerQuery, findFallen, planRevive, summaryOf, recordEdit, REV_MARGIN, BEFORE_DEATH_S, STATEMENT_MAX_BYTES } from '../../../tools/reviveRealmCharacter.mjs';
 import { GUILD_RANK_MASTER } from '../../../src/net/guild/guildLaw.js';
 
-const src = (p) => readFileSync(new URL(`../../../${p}`, import.meta.url), 'utf8');
 const P = 'p0123456789abcdef0123456789abcde', Q = 'q0123456789abcdef0123456789abcde';
 const F = `r${'f'.repeat(20)}`, H = `r${'e'.repeat(20)}`, G = `r${'d'.repeat(20)}`;
 const LID = 'fam-abc-abcdef';
@@ -171,51 +166,11 @@ test('REVIVE: the operator\'s plan over the real death - the tombstone cleared, 
   assert.match(summaryOf({ handle: 'TheHalfinStream', found, plan, apply: false }), /A dry run: nothing was written/);
 });
 
-/**
- * The tool's own command line, run as the workflow's own line writes it: the line read out of realm-revive.yml, its
- * words split as bash splits them, `$HANDLE`, `$CHARACTER`, `$RUNNER_TEMP` and `$flags` put in as the step puts them.
- * @param {string} mode @param {Record<string, string>} vars @param {string} cwd
- */
-function runAsTheWorkflow(mode, vars, cwd) {
-  const line = src('.github/workflows/realm-revive.yml').split('\n').map((l) => l.trim()).find((l) => l.startsWith(`node $tool ${mode} `));
-  assert.ok(line, `the workflow no longer runs the tool's ${mode}`);
-  const words = line.slice('node $tool '.length).split(' > ')[0].trim().split(/\s+/)
-    .flatMap((w) => (w === '$flags' ? (vars.flags ? vars.flags.trim().split(/\s+/) : []) : [w.replace(/^"|"$/g, '').replace(/\$(HANDLE|CHARACTER|RUNNER_TEMP)/g, (_, k) => vars[k])]));
-  const out = spawnSync(process.execPath, [new URL('../../../tools/reviveRealmCharacter.mjs', import.meta.url).pathname, ...words], { cwd, encoding: 'utf8' });
-  assert.equal(out.status, 0, `the workflow's ${mode} line fails the tool: ${out.stderr}`);
-  return out.stdout;
-}
-
-test('REVIVE: the tool\'s command line as the workflow\'s lines run it - the find, then the plan (whose line carries --find too: the first run took it for a find and failed), as Mac ran it (keep_homes, apply) and as a dry run; the mode is the first word of every line (mutant: the mode any word)', async () => {
-  const { raw, ask, facts, then } = await theDeath({ master: false });
-  const dir = mkdtempSync(join(tmpdir(), 'revive-'));
-  try {
-    const vars = { HANDLE: 'TheHalfinStream', CHARACTER: '', RUNNER_TEMP: dir };
-    writeFileSync(join(dir, 'facts.json'), JSON.stringify(facts()));
-    writeFileSync(join(dir, 'found.json'), runAsTheWorkflow('--find', vars, dir));
-    const found = JSON.parse(readFileSync(join(dir, 'found.json'), 'utf8'));
-    assert.equal(found.fallen, F);
-    assert.equal(found.before, DEAD_S - BEFORE_DEATH_S, 'the moment the workflow rewinds to');
-    writeFileSync(join(dir, 'then.json'), JSON.stringify(then));
-    writeFileSync(join(dir, 'now.json'), JSON.stringify(nowFacts(ask, then.seat[0].guild_id, then)));
-    // the dry run
-    assert.match(runAsTheWorkflow('--plan', { ...vars, flags: '' }, dir), /^\d+ statement\(s\), 0 held\n$/);
-    assert.match(readFileSync(join(dir, 'summary.md'), 'utf8'), /A dry run: nothing was written/);
-    // as Mac ran it: the homes left with the heir, the revive written
-    runAsTheWorkflow('--plan', { ...vars, flags: ' --keep-homes --apply' }, dir);
-    assert.doesNotMatch(readFileSync(join(dir, 'summary.md'), 'utf8'), /A dry run/);
-    for (const stmt of readFileSync(join(dir, 'revive.sql'), 'utf8').split('\n').filter(Boolean)) raw.exec(stmt);
-    assert.equal(raw.prepare('SELECT dead_at FROM realm_characters WHERE id = ?').get(F).dead_at, null, 'the tombstone stands');
-    assert.deepEqual(JSON.parse(raw.prepare('SELECT record FROM lineages WHERE id = ?').get(LID).record).people[0].revived, [DIED_AT]);
-    assert.equal(raw.prepare('SELECT char_id FROM homes WHERE map_id = 4242').get().char_id, H, 'keep_homes moved the home anyway');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-  // every line of the workflow names its mode first, and the tool reads its mode from the first word alone
-  const calls = [...src('.github/workflows/realm-revive.yml').matchAll(/node \$tool (--[a-z-]+)/g)].map((m) => m[1]);
-  assert.deepEqual([...new Set(calls)].sort(), ['--find', '--plan', '--player-query', '--query']);
-  assert.match(src('tools/reviveRealmCharacter.mjs'), /const mode = argv\[0\];/);
-});
+// DFO-83 (2026-11-07): .github/workflows/realm-revive.yml was removed as part of the inherited-operational-Actions
+// cleanup, along with this file's test of its command lines (replayed via a `runAsTheWorkflow` helper that read
+// them straight out of the workflow) and its by-hand dispatch/maintenance-hold test below - those were pure
+// workflow-content assertions with nothing surviving independent of the deleted file. The tool's own modes
+// (--find, --plan, --player-query, --query) are still exercised directly by the tests above and below.
 
 test('REVIVE-SIZE: a line\'s record past what one D1 statement takes is revived by an edit in place - the statement small, the record it leaves exactly the revival\'s, the rest of the record as it was; the line written before the tombstone; a plan with any statement too long writes nothing; an edit that cannot say the change is refused (mutants: the whole record in the statement; the tombstone first; the long statement written)', async () => {
   const { raw, ask, facts, then } = await theDeath({ master: false });
@@ -316,17 +271,4 @@ test('REVIVE: the tombstone is cleared only over the death the plan read - a dea
   const sib = `r${'1'.repeat(20)}`;
   f.chars.push({ id: sib, name: 'Sib', lineage_id: LID, person_id: 7, dead_at: null, dead_why: null, created_at: DEAD_S - 100 });
   assert.deepEqual(findFallen(f).heirs, [H], 'a sibling played before the death was taken for her heir');
-});
-
-test('REVIVE: the workflow - by hand, a dry run by default, its inputs as environment, found before anything is held, the present ALWAYS put back, and the maintenance never lifted over a rewound database (mutants: apply by default; an input spliced; the lift over a rewind)', () => {
-  const wf = src('.github/workflows/realm-revive.yml');
-  assert.match(wf, /on:\n  workflow_dispatch:/);
-  assert.match(wf, /      apply:\n        description: [^\n]*\n        required: true\n        default: false/);
-  assert.doesNotMatch(wf, /run: [^\n]*\$\{\{ inputs\./, 'an input spliced into a run line');
-  assert.match(wf, /HANDLE: \$\{\{ inputs\.handle \}\}/);
-  assert.ok(wf.indexOf('- name: Find the character') < wf.indexOf('- name: Hold the service for maintenance'), 'held before anything was found');
-  assert.match(wf, /- name: Put the present back\n        if: always\(\) && env\.REWOUND == '1'/);
-  assert.match(wf, /- name: Lift the maintenance\n        if: always\(\) && env\.HELD == '1' && env\.REWOUND != '1'/);
-  assert.match(wf, /- name: Write the revive\n        if: env\.APPLY == 'true'/);
-  assert.match(wf, /group: account-deploy/);
 });

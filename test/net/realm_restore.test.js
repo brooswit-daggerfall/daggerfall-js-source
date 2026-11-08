@@ -164,36 +164,10 @@ test('RESTORE C: the dumps and the words - a wrangler export loads with its fore
   assert.ok(NOW_TABLES.includes('realm_trades') && NOW_TABLES.includes('realm_census') && NOW_TABLES.includes('realm_characters'));
 });
 
-test('RESTORE C: the operator\'s workflow - by hand only, never beside a deploy, a dry run unless asked; the service held for maintenance first; the present\'s bookmark kept, the rewind proven, and the present put back ALWAYS, proven by its counts; the switch lifted only once the present is back; inputs reach the scripts as environment, never pasted into them', () => {
-  const wf = src('.github/workflows/realm-restore.yml');
-  assert.match(wf, /^on:\n {2}workflow_dispatch:/m, 'run by hand from the Actions tab, and only so');
-  assert.doesNotMatch(wf, /^\s+(push|schedule|pull_request):/m);
-  assert.match(wf, /concurrency:\n {2}group: account-deploy\n {2}cancel-in-progress: false/);
-  assert.match(wf, /apply:\n(?:.*\n)*? {8}default: false/, 'a dry run unless asked');
-  assert.match(wf, /BEFORE: \$\{\{ inputs\.before \}\}/);
-  assert.match(wf, /APPLY: \$\{\{ inputs\.apply \}\}/);
-  assert.equal((wf.match(/\$\{\{ inputs\./g) ?? []).length, 2, 'the two inputs reach the job as environment, and nowhere else');
-  const order = ['Hold the service for maintenance', 'Keep the present', 'Export the present', 'Rewind to before the loss', 'Export what stood then', 'Put the present back', 'Plan the restore', 'Write the restore', 'Lift the maintenance'];
-  const at = order.map((name) => wf.indexOf(`- name: ${name}`));
-  assert.ok(at.every((i) => i > 0), `every step named: ${order.filter((_, i) => at[i] < 0)}`);
-  assert.deepEqual([...at].sort((a, b) => a - b), at, 'in this order');
-  const step = (name) => wf.slice(wf.indexOf(`- name: ${name}`), wf.indexOf('- name:', wf.indexOf(`- name: ${name}`) + 8) >>> 0 || undefined);
-  assert.match(step('Put the present back'), /if: always\(\) && env\.REWOUND == '1'/);
-  assert.match(step('Put the present back'), /time-travel restore "\$DB_NAME" --bookmark "\$NOW_BOOKMARK"/);
-  assert.match(step('Put the present back'), /REWOUND=0/);
-  assert.match(step('Rewind to before the loss'), /REWOUND=1/);
-  assert.match(step('Rewind to before the loss'), /time-travel restore "\$DB_NAME" --timestamp "\$BEFORE"/);
-  assert.match(step('Rewind to before the loss'), /NOW_BOOKMARK/, 'the rewind is proven by the bookmark moving');
-  assert.match(step('Lift the maintenance'), /if: always\(\) && env\.REWOUND != '1'/, 'never over a rewound database');
-  assert.match(step('Write the restore'), /if: env\.APPLY == 'true'/);
-  assert.match(step('Plan the restore'), /node tools\/realmRestore\.mjs --then "\$RUNNER_TEMP\/then\.sql" --now "\$RUNNER_TEMP\/now\.sql"/);
-  assert.match(step('Hold the service for maintenance'), /deploy --var MAINTENANCE:1/);
-  assert.match(step('Hold the service for maintenance'), /-X POST "\$base\/v1\/realm\/customs" -H 'content-type: application\/json' -d '\{\}' /, 'the write proven refused is asked with no credential');
-  assert.doesNotMatch(wf, /\/v1\/auth\//, 'never proven by asking for an account: an account route writes its rate row on an instance not yet held');
-  for (const t of THEN_TABLES) assert.match(step('Export what stood then'), new RegExp(`--table ${t}\\b`));
-  for (const t of NOW_TABLES) assert.match(step('Export the present'), new RegExp(`--table ${t}\\b`));
-  assert.doesNotMatch(wf, /--table players/, 'no player row is ever exported - handles are asked for by name');
-});
+// DFO-83 (2026-11-07): .github/workflows/realm-restore.yml was removed as part of the inherited-operational-Actions
+// cleanup, along with this file's test of its by-hand dispatch, maintenance hold, rewind and restore steps - that
+// was a pure workflow-content assertion with nothing surviving independent of the deleted file. The maintenance
+// switch itself is still pinned below, directly against the Worker.
 
 test('RESTORE C: the maintenance switch - held, the service answers its health (saying so) and its public key, and refuses every other call 503 `maintenance`, a word the client can say; unheld, nothing of it shows; and no config the repository deploys ever throws it', async () => {
   const ask = async (env, path, init = {}) => {

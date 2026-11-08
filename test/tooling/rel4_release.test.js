@@ -148,40 +148,9 @@ test('REL4: a release takes `latest` unless a newer one holds it - a hand re-cut
   assert.equal(shouldMarkLatest('v1.0.0', 'app-v0.1.1'), false, 'an unparseable tag never takes latest');
 });
 
-test('REL4: the workflow - one number, legs that only build, one publish gated on every leg, a draft published in one step', () => {
-  const wf = rd('.github/workflows/release-desktop.yml');
-  const job = (name) => {
-    const at = wf.indexOf(`\n  ${name}:\n`);
-    assert.ok(at > 0, `a ${name} job`);
-    const next = wf.slice(at + 1).search(/\n {2}[a-z][\w-]*:\n/);
-    return next < 0 ? wf.slice(at) : wf.slice(at, at + 1 + next);
-  };
-  const version = job('version'), build = job('build'), publish = job('publish');
-  assert.equal((wf.match(/- name: Resolve release version/g) ?? []).length, 1, 'the number is resolved once');
-  assert.match(version, /- name: Resolve release version/);
-  assert.match(build, /needs: \[version, gate\]/, 'no leg packages before the suite passed');
-  assert.doesNotMatch(build, /action-gh-release|gh release|releases\//, 'a leg publishes NOTHING');
-  assert.match(build, /uses: actions\/upload-artifact@v4[\s\S]*name: desktop-\$\{\{ matrix\.os \}\}/, 'it hands its files on');
-  assert.match(publish, /needs: \[version, build\]/, 'publish waits for the WHOLE matrix');
-  assert.match(publish, /if: needs\.version\.outputs\.tag != ''/, 'and only when there is a release to cut (no always(): a failed leg skips it)');
-  assert.doesNotMatch(publish, /always\(\)|failure\(\)|cancelled\(\)/);
-  assert.match(publish, /uses: actions\/download-artifact@v4[\s\S]*pattern: desktop-\*[\s\S]*merge-multiple: true/);
-  const check = publish.indexOf('desktopRelease.mjs check release'), stage = publish.indexOf('uses: softprops/action-gh-release@');
-  assert.ok(check > 0 && stage > check, 'the set is checked before anything is staged');
-  assert.match(publish, /draft: true/, 'staged as a draft - invisible while the files upload');
-  assert.match(publish, /body_path: release-notes\.md/);
-  assert.equal((wf.match(/generate_release_notes: true/g) ?? []).length, 1, 'GitHub\'s list is generated ONCE');
-  assert.match(publish, /-F draft=false -f make_latest="\$MAKE_LATEST"/, 'and published in one step');
-  assert.match(publish, /MAKE_LATEST=\$\(node scripts\/desktopRelease\.mjs latest "\$TAG" "\$CURRENT"\)/);
-  assert.match(publish, /RELEASE_ID: \$\{\{ steps\.release\.outputs\.id \}\}/, 'the draft it staged, by id - a draft has no tag to look up');
-  assert.match(publish, /permissions:\n\s+contents: write/, 'only the publish job writes');
-  assert.match(wf, /^permissions:\n {2}contents: read$/m, 'everything else reads');
-  assert.match(publish, /target_commitish: \$\{\{ steps\.host\.outputs\.target \}\}/, 'AUDIT 68: the tag lands on the commit the files were built from (the host step names it)');
-  // REL6: the notes are read off the merged pull requests, with the job's own token
-  assert.match(publish, /permissions:\n\s+contents: write\n\s+pull-requests: read\b/, 'REL6: the publish job may read pull requests');
-  const notesStep = publish.slice(publish.indexOf('- name: Write the notes'), publish.indexOf('desktopRelease.mjs notes'));
-  assert.match(notesStep, /\n {10}GH_TOKEN: \$\{\{ github\.token \}\}\n/, 'REL6: and the notes step hands gh that token');
-});
+// DFO-83 (2026-11-07): REL4's workflow-structure test (the version/build/publish job wiring of
+// .github/workflows/release-desktop.yml) was removed with the workflow itself, which was deleted as part of the
+// inherited-operational-Actions cleanup. The desktopRelease.mjs logic it called is still covered above and below.
 
 test('REL5: the site links each installer by the name the release promises - the door\'s Install lands on them, one click each', () => {
   const landing = rd('index.html');
@@ -401,11 +370,6 @@ test('BR5: a copy from before the rename still finds its download, and a copy fr
   assert.ok(Object.isFrozen(LEGACY_DOWNLOAD_FILES));
   assert.deepEqual(ALIAS_COPIES.map(([from, to]) => [from, to]), Object.keys(DOWNLOAD_FILES).map((k) => [DOWNLOAD_FILES[k], LEGACY_DOWNLOAD_FILES[k]]),
     'each download is copied under ITS old name, never another\'s');
-  // the alias step runs on the collected files, before the set is checked - a release short of one publishes nothing
-  const wf = rd('.github/workflows/release-desktop.yml');
-  const collect = wf.indexOf('- name: Collect every leg\'s files'), aliasStep = wf.indexOf('run: node scripts/desktopRelease.mjs alias release'),
-    check = wf.indexOf('run: node scripts/desktopRelease.mjs check release');
-  assert.ok(collect > 0 && aliasStep > collect && check > aliasStep, 'collected, then copied, then checked');
   // and it really copies: a folder of the four, aliased, is a folder of eight with the same bytes
   const dir = mkdtempSync(join(tmpdir(), 'br5-alias-'));
   try {

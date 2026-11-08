@@ -1,14 +1,13 @@
 // GUILD-GRANT (2026-10-03, Mac: "Can we award the empire of tamriel guild 1.6mil gold") - gold into one guild's
-// treasury, awarded by the operator. `tools/grantGuildGold.mjs` writes the statements and
-// `.github/workflows/guild-grant.yml` runs them by hand - a dry run that reads the guild, then the award. The award is
-// the treasury AND `realm_gold`, so it buys a hall and comes back out to a realm character, and the guild's own ledger
-// says who put it there.
+// treasury, awarded by the operator. `tools/grantGuildGold.mjs` writes the statements for an operator to run by hand -
+// a dry run that reads the guild, then the award. The award is the treasury AND `realm_gold`, so it buys a hall and
+// comes back out to a realm character, and the guild's own ledger says who put it there.
+// DFO-83 (2026-11-07): .github/workflows/guild-grant.yml, which used to run the tool's statements by hand from a
+// workflow_dispatch, was removed with the rest of the inherited operational workflows; its contract test went with it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, chmodSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { standService, d1 } from '../accountDb.mjs';
 import { grantSql, lookSql, grantGold, GRANT_BY } from '../../tools/grantGuildGold.mjs';
@@ -16,7 +15,6 @@ import { GUILD_LEDGER_WORDS } from '../../src/ui/socialPanel.js';
 import { GUILD_TREASURY_MAX, GUILD_RANK_NAMES } from '../../src/net/guild/guildLaw.js';
 
 const ROOT = new URL('../../', import.meta.url);
-const src = (p) => readFileSync(new URL(p, ROOT), 'utf8');
 const TOOL = fileURLToPath(new URL('tools/grantGuildGold.mjs', ROOT));
 
 test('GUILD-GRANT end to end: the award lands in the treasury AND what buys a hall, the ledger names it the developers\' award, a realm character can take it out, and the next deposit is a deposit again (mutants: realm_gold left out; the kind unnamed; the moment unstamped)', async () => {
@@ -96,78 +94,4 @@ test('GUILD-GRANT the tool: only a name a guild could be founded with, only a wh
     assert.equal(r.status, 1, args.join(' '));
     assert.equal(r.stdout, '', 'nothing for the workflow to run');
   }
-});
-
-/** A step's `run: |` block, by its name, as the runner hands it to bash (audit0929_terms.test.js's reader). */
-function runBlock(yml, stepName) {
-  const at = yml.indexOf(`- name: ${stepName}\n`);
-  assert.ok(at >= 0, `no step named "${stepName}"`);
-  const from = yml.indexOf('run: |\n', at) + 'run: |\n'.length;
-  const lines = [];
-  for (const l of yml.slice(from).split('\n')) {
-    if (l.trim() && !l.startsWith('          ')) break;
-    lines.push(l.slice(10));
-  }
-  return lines.join('\n');
-}
-
-test('GUILD-GRANT the workflow: run by hand only, its inputs read once each as environment, the tool\'s statements in the deploy\'s queue, the award behind apply alone, and a run that finds no guild or changes none fails - its steps run here as the runner runs them, over D1\'s own answer (mutants: an input spliced into a run line; a missing guild passing; an award that changed none passing; the award run on a dry run)', () => {
-  const wf = src('.github/workflows/guild-grant.yml');
-  const on = /\non:\n([\s\S]*?)\n\S/.exec(wf)?.[1] ?? '';
-  assert.match(on, /^ {2}workflow_dispatch:/);
-  assert.doesNotMatch(on, /push:|pull_request|schedule:/);
-  assert.match(on, /\n {6}apply:\n(?: {8}.*\n)*? {8}default: false\n/, 'a dry run unless asked');
-  assert.equal(wf.match(/\$\{\{ inputs\./g)?.length, 3, 'the three inputs, each read once');
-  assert.match(wf, /\n {6}GUILD: \$\{\{ inputs\.guild \}\}\n {6}GOLD: \$\{\{ inputs\.gold \}\}\n {6}APPLY: \$\{\{ inputs\.apply \}\}\n/);
-  assert.match(wf, /\nconcurrency:\n {2}group: account-deploy\n {2}cancel-in-progress: false\n/);
-  assert.match(wf, /\npermissions:\n {2}contents: read\n/);
-  assert.doesNotMatch(wf, /d1 create|migrations apply|wrangler deploy/, 'it creates, migrates and deploys nothing');
-  assert.equal(wf.match(/if: env\.APPLY == 'true'\n/g)?.length, 1);
-  assert.match(wf, /- name: Award the gold\n {8}if: env\.APPLY == 'true'\n/, 'the award, and the award alone, behind apply');
-
-  // THE STEPS, run by bash over a wrangler that answers as D1 does (the look's rows, then the award's)
-  const dir = mkdtempSync(join(tmpdir(), 'guildgrant-'));
-  const fake = join(dir, 'wrangler');
-  writeFileSync(fake, '#!/usr/bin/env bash\ncase "$*" in *"UPDATE guilds"*) cat "$FAKE_DIR/grant.json";; *) cat "$FAKE_DIR/look.json";; esac\n');
-  chmodSync(fake, 0o755);
-  const d1Answer = (rows) => JSON.stringify([{ results: rows, success: true, meta: {} }]);
-  const run = (step, { guild = 'empire of tamriel', gold = '1600000', apply = 'false', look = [], grant = [] } = {}) => {
-    writeFileSync(join(dir, 'look.json'), d1Answer(look));
-    writeFileSync(join(dir, 'grant.json'), d1Answer(grant));
-    const summary = join(dir, `summary-${Math.random()}`);
-    writeFileSync(summary, '');
-    const r = spawnSync('bash', ['-c', runBlock(wf, step)], {
-      cwd: fileURLToPath(ROOT),
-      env: { PATH: process.env.PATH, WRANGLER: fake, FAKE_DIR: dir, DB_NAME: 'daggerfall-accounts', RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: summary, GUILD: guild, GOLD: gold, APPLY: apply },
-      encoding: 'utf8',
-    });
-    return { ...r, summary: readFileSync(summary, 'utf8') };
-  };
-
-  let r = run('Write the statements');
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(readFileSync(join(dir, 'look.sql'), 'utf8'), `${lookSql('empire of tamriel')}\n`);
-  assert.equal(readFileSync(join(dir, 'grant.sql'), 'utf8'), `${grantSql('empire of tamriel', '1600000')}\n`);
-  assert.notEqual(run('Write the statements', { gold: '1,600,000' }).status, 0, 'a bad award stops the run before the database is asked');
-  assert.notEqual(run('Write the statements', { guild: '$(touch pwned)' }).status, 0);
-  assert.equal(run('Write the statements').status, 0, 'the good statements again - a refused step ends a real run here');
-
-  const eot = { name: 'Empire of Tamriel', tag: 'EOT', treasury: 100_000, realm_gold: 60_000, members: 12 };
-  r = run('Read the guild', { look: [eot] });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.summary, /\*\*Empire of Tamriel \[EOT\]\*\*, 12 members/);
-  assert.match(r.summary, /\| treasury \| 100000 \| 1700000 \|/);
-  assert.match(r.summary, /\| buys a hall \| 60000 \| 1660000 \|/);
-  assert.match(r.summary, /A dry run: nothing was written/);
-  assert.doesNotMatch(run('Read the guild', { look: [eot], apply: 'true' }).summary, /A dry run/);
-  r = run('Read the guild', { look: [] });
-  assert.equal(r.status, 1, 'no guild by that name fails the run');
-  assert.match(r.stdout, /::error::no guild is named empire of tamriel - nothing was changed/);
-
-  r = run('Award the gold', { apply: 'true', grant: [{ name: 'Empire of Tamriel', tag: 'EOT', treasury: 1_700_000, realm_gold: 1_660_000 }] });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.summary, /\*\*Awarded\.\*\* Empire of Tamriel \[EOT\] now holds 1700000 gold, 1660000 of it able to buy a hall\./);
-  r = run('Award the gold', { apply: 'true', grant: [] });
-  assert.equal(r.status, 1, 'an award that changed no guild fails the run');
-  assert.match(r.stdout, /::error::the award changed no guild/);
 });

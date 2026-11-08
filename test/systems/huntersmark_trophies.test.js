@@ -190,11 +190,12 @@ test('HUNTERS-MARK THE GATHERED LOG AND THE COLLECTIONS PAGE\'S PARTS: a fish lo
   assert.match(draw('annals', null).textContent, /Sign in to your account/);
 });
 
-test('HUNTERS-MARK THE FOUR HOSTS\' WIRING (Bounty-Boards.md 12.8): the streaming world builds the hunt\'s online deps and the trophy door in their modules and hands them over - the gather host its entity to a kind\'s answer, the Standing page its hunt block, the deploy filter the trophy law the service now reads (mutants: the kind\'s answer told no entity; the host\'s hunt deps gone; the trophy door gone)', () => {
+test('HUNTERS-MARK THE FOUR HOSTS\' WIRING (Bounty-Boards.md 12.8): the streaming world builds the hunt\'s online deps and the trophy door in their modules and hands them over - the gather host its entity to a kind\'s answer, the Standing page its hunt block (mutants: the kind\'s answer told no entity; the host\'s hunt deps gone; the trophy door gone)', () => {
   assert.match(src('src/scenes/gatherHost.js'), /k\?\.answered\?\.\(d, \(t\) => hud\.toast\(t\), \{ hauled, entity: deps\.entity\?\.\(\) \?\? null \}\)/);
   const world = hostText('src/scenes/world.js');
   assert.match(world, /    hunt: huntOnline\(params\.has\('online'\), saveSoon\),\n/);
   assert.match(world, /huntKind\(\{ book: profBook, bodies: \(\) => host\.huntBodies\(\), openLoot: openHuntLoot, trophy: trophyDoor\(saveSoon\) \}\)/);
   assert.match(src('src/ui/enhanced/enhancedMenu.js'), /statsHunt\(detail, \{ el, divider: pxDivider, meter: pxMeter \}\);/);
-  assert.match(src('.github/workflows/account-deploy.yml'), /- "src\/net\/trophyLaw\.js"/);
+  // DFO-83 (2026-11-07): the deploy-path check (account-deploy.yml bundling src/net/trophyLaw.js) was removed
+  // with that workflow.
 });

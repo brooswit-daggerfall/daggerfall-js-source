@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const { parseReleaseTag, parseVersion, isNewerRelease } = require('../../app/lib/updateCheck.cjs');
 const root = path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 
-test('DA6/REL1/REL3: the release\'s number is ONE variable - the tag and the stamp both read it, and the committed version is only the base', () => {
+test('DA6/REL1/REL3: the release\'s number is ONE variable, and the committed version is only the base', () => {
   // THE NAG THIS FILE EXISTS TO PREVENT: app-v0.1.3 was cut from a
   // marker bumped alone, named for one version and stamped with the
   // last, so every fresh install announced an update it already had.
@@ -23,23 +23,12 @@ test('DA6/REL1/REL3: the release\'s number is ONE variable - the tag and the sta
   // PATCH from the commit count on main - into one shell variable, and
   // both the release tag and the `npm version` stamp electron-builder
   // bakes in read that variable. There is no second number to drift.
-  const wf = fs.readFileSync(path.join(root, '.github/workflows/release-desktop.yml'), 'utf8');
-  assert.match(wf, /TAG="app-v\$\{BASE\}\.\$\(git rev-list --count HEAD\)"/, 'a main push derives the tag from the base and the commit count');
-  assert.match(wf, /BASE=\$\(node -p "require\('\.\/app\/package\.json'\)\.version\.split\('\.'\)\.slice\(0,2\)\.join\('\.'\)"\)/, 'the base is the committed MAJOR.MINOR');
-  // AUDIT INSTALL L1-5: the tag is app-v<n>.<n>.<n> EXACTLY or the run fails - a tag name can carry quotes and `$`
-  assert.ok(wf.includes('if [ -n "$TAG" ] && ! [[ "$TAG" =~ ^app-v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then'), 'the tag is held to its shape before anything reads it');
-  assert.ok(wf.includes('VERSION="${TAG#app-v}"'), 'the version IS the tag, less its prefix');
-  // REL4: resolved ONCE, by the `version` job, whose outputs ARE the step's - every leg and the publish job read them
-  assert.match(wf, /\n  version:\n[\s\S]*?outputs:\n\s+tag: \$\{\{ steps\.reltag\.outputs\.tag \}\}\n\s+version: \$\{\{ steps\.reltag\.outputs\.version \}\}/, 'the version job hands the one number on');
-  // AUDIT INSTALL R2-B1: and in bash - on the Windows leg a step with no shell is PowerShell, where "$VERSION" is unset
-  assert.match(wf, /shell: bash\n\s+env:\n\s+VERSION: \$\{\{ needs\.version\.outputs\.version \}\}\n\s+run: npm version "\$VERSION" --no-git-tag-version --allow-same-version/,
-    'the stamp reads the same output - from the environment, never pasted into the script, in a shell that reads it on every leg');
-  assert.match(wf, /tag_name: \$\{\{ needs\.version\.outputs\.tag \}\}/, 'the release is cut at the same output');
-  // REL4: in the job that COUNTS - the publish job's own full checkout (for the notes' diff) must not stand in for it
-  const versionJob = wf.slice(wf.indexOf('\n  version:\n'), wf.indexOf('\n  gate:\n'));
-  assert.match(versionJob, /fetch-depth: 0   # REL3: the version is the commit count, which needs the whole history/, 'the count needs the whole history');
+  //
+  // DFO-83 (2026-11-07): the derivation's own workflow wiring (release-desktop.yml's TAG/BASE/VERSION shell
+  // variables, its version job's outputs, and its concurrency group) was removed with that workflow. What
+  // remains here is independent of it: the retired marker file stays retired, and the committed base and this
+  // file's own tag parser/comparator still agree on what a commit-count patch looks like.
   assert.ok(!fs.existsSync(path.join(root, '.github/DESKTOP_RELEASE')), 'the marker file is retired - a second number is a drift waiting to happen');
-  assert.doesNotMatch(wf, /DESKTOP_RELEASE/, 'and nothing reads it');
   // the committed version is the BASE: CI owns the patch, so it is 0 here
   const appVersion = JSON.parse(fs.readFileSync(path.join(root, 'app/package.json'), 'utf8')).version;
   assert.match(appVersion, /^\d+\.\d+\.0$/, `app/package.json carries the base MAJOR.MINOR.0, not a hand-bumped patch (${appVersion})`);
@@ -48,14 +37,6 @@ test('DA6/REL1/REL3: the release\'s number is ONE variable - the tag and the sta
   assert.deepEqual(parseReleaseTag(derived), [0, 1, 960]);
   assert.equal(isNewerRelease('0.1.5', derived), true, 'a commit-count patch outranks every hand-cut release');
   assert.equal(isNewerRelease('0.1.960', derived), false, 'a build of this very release must not nag');
-  // every main push is a release: no paths filter narrows the door, and runs queue rather than cancel
-  const on = wf.slice(wf.indexOf('\non:'), wf.indexOf('\npermissions:'));
-  assert.match(on, /branches:\n\s+- main\n/, 'main pushes cut releases');
-  assert.doesNotMatch(on, /paths:/, 'every merge, not a marker');
-  // a release half uploaded is worse than one late - and AUDIT INSTALL L3-6: main pushes share one group (the newest
-  // waiting merge is cut next), while a manual door is a group of its own that no merge cancels
-  assert.match(wf, /concurrency:\n  group: \$\{\{ github\.event_name == 'push' && github\.ref == 'refs\/heads\/main' && 'release-desktop-main' \|\| format\('release-desktop-\{0\}', github\.run_id\) \}\}\n  cancel-in-progress: false/,
-    'a release half uploaded is worse than one late');
 });
 
 test('DA6: only the app-v shape release-desktop cuts parses as a release tag', () => {

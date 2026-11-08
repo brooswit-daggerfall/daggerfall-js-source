@@ -137,18 +137,9 @@ test('REL8: the game says it - the pause window\'s version line leads with the n
   assert.match(menu, /\[t\('menu\.about\.update', 'Update'\), UPDATE \?\? t\('menu\.about\.devBuild', 'a development build'\)\],[^\n]*\n\s*\[t\('menu\.about\.build', 'Build'\), BUILD_TAG\],/);
 });
 
-test('REL8: the site and the release derive it where the history is whole, and every leg is told the one number; the release is named for it', () => {
-  const deploy = rd('.github/workflows/deploy.yml');
-  assert.match(deploy, /- name: Checkout production\n\s+uses: actions\/checkout@v4\n\s+with:\n\s+ref: \$\{\{ needs\.main\.outputs\.sha \}\}\n\s+path: production\n(?:\s+#[^\n]*\n)*\s+fetch-depth: 0\n/, 'the production build counts main\'s history');
-  const rel = rd('.github/workflows/release-desktop.yml');
-  assert.match(rel, /\n {6}update: \$\{\{ steps\.reltag\.outputs\.update \}\}\n/, 'the version job\'s output');
-  assert.match(rel, /UPDATE=\$\(node scripts\/updateNumber\.mjs\)\n\s+if \[ -n "\$UPDATE" \] && ! \[\[ "\$UPDATE" =~ \^\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$ \]\]; then/, 'derived once, digits only');
-  assert.match(rel, /echo "update=\$UPDATE" >> "\$GITHUB_OUTPUT"/);
-  assert.match(rel, /- name: Build the site\n\s+env:\n\s+DFO_UPDATE: \$\{\{ needs\.version\.outputs\.update \}\}[^\n]*\n\s+run: npm run build\n/, 'each leg stamps the game it packs');
-  assert.equal(UPDATE_ENV, 'DFO_UPDATE');
-  assert.match(rel, /name: \$\{\{ needs\.version\.outputs\.update != '' && format\('Update \{0\}', needs\.version\.outputs\.update\) \|\| needs\.version\.outputs\.tag \}\}/, 'the release named "Update <n>", the tag where there is none');
-  assert.match(rel, /tag_name: \$\{\{ needs\.version\.outputs\.tag \}\}/, 'the tag is still the installer\'s number - the updater compares it');
-});
+// DFO-83 (2026-11-07): REL8's workflow test (deploy.yml's production checkout and release-desktop.yml's
+// version/update-stamp wiring) was removed with both workflows, which were deleted as part of the
+// inherited-operational-Actions cleanup. scripts/updateNumber.mjs's own logic is still covered by the tests above.
 
 test('REL8: the launcher\'s news reads the release\'s name back - "Update 0.0.1" is the update, any other name none - keeps it in news.json and heads the notes with it', () => {
   const name = 'Update 0.0.1';

@@ -6,21 +6,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdtempSync, chmodSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
 
 import { standService } from '../accountDb.mjs';
 import { checkoutFields, stripeCheckout, shopConfirmPage, STRIPE_API, STRIPE_PMC_API, SHOP_PAY_METHODS } from '../../server-account/src/shop.js';
 import { stripeMethods, accountDefault, methodState, PAY_METHOD_NAME } from '../../tools/stripeMethods.mjs';
 import { shopWareById } from '../../src/net/shopLaw.js';
-import { graph } from '../importGraph.mjs';
 
 // AURUM-ONLY (PIN MOVED): money buys the Aurum packs alone, so the checkout is a pack's - the 2,400, $19.99
 const ON = { STRIPE_SECRET_KEY: 'sk_test_shop', STRIPE_WEBHOOK_SECRET: 'whsec_shop', SHOP_ON_SALE: 'title:genesis,glyph:origin,aura:eternal,aurum:2400', AURUM_OPEN: 'on' };
 const KEY = 'sk_live_never_said';
-const rd = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
 const order = () => ({ id: 'a'.repeat(24), player: 'p1', handle: 'Buyer', ware: shopWareById('aurum:2400'), origin: 'https://accounts.invalid', expiresAt: 123 });
 
 test('SHOP-LOCAL the checkout asks Stripe for the buyer\'s own currency (Adaptive Pricing), still priced in dollars by the service; the confirm page says Stripe can show it (mutants: the ask dropped; the line dropped)', () => {
@@ -148,42 +142,6 @@ test('SHOP-LOCAL THE WAYS TO PAY (tools/stripeMethods.mjs): iDEAL, Wero, Bancont
   assert.equal(bad.asked.length, 1);
 });
 
-test('SHOP-LOCAL the deploy runs it on every account deploy, after the Stripe secrets and before Discord\'s last step: the key an env var from the repository\'s secrets, never an argument; never red (cards are taken either way) - a failure a warning and the summary\'s line; skipped, said, with no key; and the deploy\'s path filter holds the tool\'s own import graph (mutants: the step red - as it first shipped; the tool unlisted)', () => {
-  const wf = rd('.github/workflows/account-deploy.yml');
-  const steps = wf.split(/\n      - name: /).slice(1);
-  const at = steps.findIndex((s) => s.startsWith('Turn on the shop\'s ways to pay, where the repository has the Stripe key\n'));
-  const secrets = steps.findIndex((s) => s.startsWith('Put the Stripe secrets, where the repository has them\n'));
-  assert.ok(at > secrets && secrets >= 0, 'after the secrets are put');
-  assert.ok(at < steps.length - 1 && steps.at(-1).startsWith('Point Discord at the service'), 'Discord\'s step stays last');
-  const step = steps[at].split(/\n\n      # /)[0];
-  assert.match(step, /STRIPE_SECRET_KEY: \$\{\{ secrets\.STRIPE_SECRET_KEY \}\}/);
-  assert.match(step, /node tools\/stripeMethods\.mjs 2> "\$err"/);
-  assert.doesNotMatch(step, /\$\{?STRIPE_SECRET_KEY\}? *[^"\s]*\s*node|--key|echo "\$\{?STRIPE_SECRET_KEY/, 'the key is never an argument nor echoed');
-  // AUDIT SHOP-LOCAL 1 (the first deploy: red, its reason unsaid, every later step skipped): the step's own bash RUN as
-  // GitHub runs it - the job's `shell: bash` is bash -e -o pipefail - with a stand-in node
-  assert.match(wf, /\n    defaults:\n      run:\n        shell: bash\n/, 'the job\'s shell, which -e comes with');
-  const script = step.split('\n        run: |\n')[1].split('\n').filter((l) => l === '' || l.startsWith('          ')).map((l) => l.slice(10)).join('\n');
-  const run = (exit, key = 'sk_test_stand_in') => {
-    const dir = mkdtempSync(join(tmpdir(), 'waystopay-'));
-    writeFileSync(join(dir, 'node'), `#!/bin/sh\necho "- iDEAL: on"\n${exit ? 'echo "Stripe refused the configurations\' list: [the key]" >&2\n' : ''}exit ${exit}\n`);
-    chmodSync(join(dir, 'node'), 0o755);
-    const summary = join(dir, 'summary.md');
-    writeFileSync(summary, '');
-    const r = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script], { encoding: 'utf8', env: { PATH: `${dir}:${process.env.PATH}`, STRIPE_SECRET_KEY: key, RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: summary } });
-    return { status: r.status, out: r.stdout, summary: readFileSync(summary, 'utf8') };
-  };
-  const failed = run(1);
-  assert.equal(failed.status, 0, `never red - cards are taken either way (${failed.out})`);
-  assert.match(failed.out, /::warning::the shop's ways to pay were not set - Stripe refused the configurations' list: \[the key\]/, 'the reason said');
-  assert.match(failed.summary, /#### The ways to pay[^]*\*\*Not set:\*\* Stripe refused/, 'and in the summary');
-  const done = run(0);
-  assert.equal(done.status, 0);
-  assert.match(done.summary, /#### The ways to pay\n\n- iDEAL: on\n/);
-  assert.doesNotMatch(done.out, /::warning::/);
-  const none = run(0, '');
-  assert.deepEqual([none.status, none.out.trim(), none.summary], [0, 'STRIPE_SECRET_KEY is not set - the ways to pay are left as they are', ''], 'no key: skipped, said');
-  const listed = (wf.split('\n    paths:\n')[1] ?? '').split('\n').filter((l) => /^      - "/.test(l)).map((l) => l.slice(9, -1));
-  const outside = graph('tools/stripeMethods.mjs').filter((f) => !f.startsWith('server-account/'));
-  assert.ok(outside.includes('tools/stripeMethods.mjs') && outside.includes('tools/lib/isMain.mjs'));
-  for (const f of outside) assert.ok(listed.includes(f), `${f} is read by the deploy's ways-to-pay step and a change to it would not deploy`);
-});
+// DFO-83 (2026-11-07): this file's deploy test (account-deploy.yml running tools/stripeMethods.mjs after the
+// Stripe secrets and before Discord's last step, and its path filter holding the tool's import graph) was
+// removed with that workflow. tools/stripeMethods.mjs's own behavior is still covered by the tests above.

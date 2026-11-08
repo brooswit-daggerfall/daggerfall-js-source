@@ -358,7 +358,7 @@ test('SEA-BOUNTY the Wanted section in the shipwright\'s window: a freeport\'s t
   win.unmount();
 });
 
-test('SEA-BOUNTY the seams by source: the relay passes the room and signs it with the killer\'s character; the fall\'s batch writes the kill; the routes; the world hands the sea\'s host the record\'s gold acts and the harbourmaster\'s tab its Wanted section; the deploy watches the law (mutants: each seam)', () => {
+test('SEA-BOUNTY the seams by source: the relay passes the room and signs it with the killer\'s character; the fall\'s batch writes the kill; the routes; the world hands the sea\'s host the record\'s gold acts and the harbourmaster\'s tab its Wanted section (mutants: each seam)', () => {
   const relay = src('server/src/index.js');
   assert.match(relay, /wildBlow\(st, a\.sub, tb\.sub, \{ d: d\.d, r, held, wa: a\.wa \?\? null, kin, rid, room: a\.key, el: d\.el \?\? null, c: d\.c \?\? null \}, now\)/);   // PIN MOVED (PVP-VITALS): and the cast's number
   assert.match(relay, /mintWildReceipt\(\{ f: fall\.fallen, c: fall\.ci, k: fall\.killer, r: fall\.r, w: fall\.w, wt: fall\.wt, m: fall\.m, kc: fall\.kc, g: fallenGone, vp: fall\.vp \}/);   // PIN MOVED (WILD-REJOIN): and whether its fallen had gone from the room; PIN MOVED (PVP-VILLAIN): and the kill's villain points
@@ -374,7 +374,8 @@ test('SEA-BOUNTY the seams by source: the relay passes the room and signs it wit
   assert.match(idx, /'\/v1\/sea\/bounty\/post': async \(\) => seaBountyPost\(sctx, who\.player, body\),/);
   assert.match(idx, /'\/v1\/sea\/bounty\/collect': async \(\) => seaBountyCollect\(sctx, who\.player, body\),/);
   assert.match(src('server-account/src/service.js'), /'\/v1\/sea\/bounty\/board',\n\s*'\/v1\/sea\/bounty\/post',\n\s*'\/v1\/sea\/bounty\/collect',/);
-  assert.match(src('.github/workflows/account-deploy.yml'), /- "src\/net\/sea\/seaBountyLaw\.js"/);
+  // DFO-83 (2026-11-07): the deploy-path check (account-deploy.yml bundling src/net/sea/seaBountyLaw.js) was
+  // removed with that workflow.
   const w = src('src/scenes/world.js');
   assert.match(w, /session: realmSession, checkpoint: onlineCheckpoint, wallet: realmWallet, region: _questRegionIndex,/);
   assert.match(src('src/scenes/seaVenturesHost.js'), /const character = deps\.character \?\? \(\(\) => characterIdOf\(playerEntity\)\);/, 'the character I play, the sea\'s host\'s own (HOST-SPLIT)');

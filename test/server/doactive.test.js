@@ -5,11 +5,9 @@
 // real one's shape (test/fixtures/doActiveGraphql.mjs). bible/11-Multiplayer/Scale-Arc.md COST-0.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   GRAPHQL, DAYS_MAX, ALWAYS_ON_H, OBJECT_DAY_USD, HOUR_EDGES, activeDays, accountId, windowDays, typeQuery, introspect,
   schemaTable, readingPlan, dayFilters, objectsQuery, totalQuery, unitOf, bucketOf, reading, graphqlAsk, namespacesOf,
@@ -118,69 +116,6 @@ test('COST-0 the reading: the schema drawn first, then each day by namespace - i
   assert.equal((await namespacesOf('t', ACCT, cf.fetch)).get(NS_GATE), 'AdmitGate (daggerfall-relay)');
 });
 
-/** A step's `run:` block, as the runner sees it. */
-function stepRun(yml, stepName) {
-  const at = yml.indexOf(`- name: ${stepName}\n`);
-  assert.ok(at >= 0, `no step named "${stepName}"`);
-  const from = yml.indexOf('run: |\n', at) + 'run: |\n'.length;
-  const lines = [];
-  for (const l of yml.slice(from).split('\n')) {
-    if (l.trim() && !l.startsWith('          ')) break;
-    lines.push(l.slice(10));
-  }
-  return lines.join('\n');
-}
-const stepOf = (yml, stepName) => { const at = yml.indexOf(`- name: ${stepName}\n`); const end = yml.indexOf('\n      - ', at + 1); return yml.slice(at, end < 0 ? undefined : end); };
-
-test('COST-0 the workflow: run by hand only, its one input read once as environment, its own queue, writing nothing, bounded, the token the two steps\' that use it and never the job\'s; the token step refuses to start without one and asks the tool\'s window first; its reading step, run here as the runner runs it over the fake endpoint, says the window and draws the reading into the summary - and a run the schema stops keeps the schema and fails (mutants: the input spliced into a run line; the token the job\'s; the token step\'s guard; the account; the run green on a stop)', () => {
-  const wf = src('.github/workflows/do-active.yml');
-  const on = /\non:\n([\s\S]*?)\n\S/.exec(wf)?.[1] ?? '';
-  assert.match(on, /^ {2}workflow_dispatch:/);
-  assert.doesNotMatch(on, /push:|pull_request|schedule:/);
-  assert.equal(wf.match(/\$\{\{ inputs\./g)?.length, 1, 'the one input, read once');
-  assert.match(wf, /\n {6}DAYS: \$\{\{ inputs\.days \}\}\n/);
-  assert.match(wf, /\nconcurrency:\n {2}group: do-active\n {2}cancel-in-progress: false\n/);
-  assert.match(wf, /\npermissions:\n {2}contents: read\n/);
-  assert.match(wf, /\n {4}timeout-minutes: 15\n/);
-  assert.match(stepOf(wf, 'Read the objects\' active time'), /run: \|\n {10}set -euo pipefail\n/);
-  assert.doesNotMatch(wf, /wrangler(@\d)? |npx |migrations apply|d1 execute|curl /, 'it deploys, migrates and writes nothing - its one call the tool\'s');
-  const job = wf.slice(wf.indexOf('\njobs:'), wf.indexOf('\n    steps:'));
-  assert.doesNotMatch(job, /CLOUDFLARE_API_TOKEN/, 'never the job\'s');
-  assert.equal(wf.match(/CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}/g)?.length, 2);
-  for (const name of ['Refuse to start without a token', 'Read the objects\' active time']) assert.match(stepOf(wf, name), /\n {8}env:\n {10}CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}\n/, name);
-
-  const dir = mkdtempSync(join(tmpdir(), 'doactive-'));
-  const guard = (token, days) => {
-    try { return { code: 0, out: execFileSync('bash', ['-c', stepRun(wf, 'Refuse to start without a token')], { cwd: ROOT, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, CLOUDFLARE_API_TOKEN: token, DAYS: days } }) }; } catch (e) { return { code: e.status, out: `${e.stdout}` }; }
-  };
-  assert.equal(guard('', '2').code, 1);
-  assert.match(guard('', '2').out, /::error::secrets\.CLOUDFLARE_API_TOKEN is not set/);
-  assert.equal(guard('x', '2').code, 0);
-  assert.notEqual(guard('x', '2; rm -rf /').code, 0, 'a window the tool refuses stops the run');
-
-  // THE READING STEP: `node` on the PATH is the real one with the fake endpoint loaded first, so the step runs as written
-  const fixture = pathToFileURL(join(ROOT, 'test/fixtures/doActiveGraphql.mjs')).href;
-  const run = (opts) => {
-    const pre = join(dir, `pre-${Math.random().toString(36).slice(2)}.mjs`);
-    writeFileSync(pre, `import { fakeCloudflare } from ${JSON.stringify(fixture)};\nconst cf = fakeCloudflare(${JSON.stringify(opts)});\nglobalThis.fetch = async (url, init) => { if (String(url).includes('/accounts/') && !String(url).includes(${JSON.stringify(ACCT)})) throw new Error('not the relay\\'s account'); return cf.fetch(url, init); };\n`);
-    const bin = join(dir, `bin-${Math.random().toString(36).slice(2)}`);
-    execFileSync('mkdir', ['-p', bin]);
-    writeFileSync(join(bin, 'node'), `#!/usr/bin/env bash\nexec ${JSON.stringify(process.execPath)} --import ${JSON.stringify(pathToFileURL(pre).href)} "$@"\n`);
-    chmodSync(join(bin, 'node'), 0o755);
-    const summary = join(dir, `summary-${Math.random().toString(36).slice(2)}.md`);
-    writeFileSync(summary, '');
-    let out, status = 0;
-    try {
-      out = execFileSync('bash', ['-c', stepRun(wf, 'Read the objects\' active time')], { cwd: ROOT, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DAYS: '2', GITHUB_STEP_SUMMARY: summary, CLOUDFLARE_API_TOKEN: 'x' } });
-    } catch (e) { out = `${e.stdout}${e.stderr}`; status = e.status; }
-    return { out, status, summary: readFileSync(summary, 'utf8') };
-  };
-  const ok = run({});
-  assert.equal(ok.status, 0, ok.out);
-  assert.match(ok.summary, /^\*\*Window: the last 2 whole UTC day\(s\), to \d{4}-\d\d-\d\d 00:00 UTC\*\*\n\n\*\*What the account exposes/);
-  assert.match(ok.summary, /\| Room \(daggerfall-relay\) \| 3 \| yes \(3\) \| 2 \| 3 \| \$0\.41 \|/);
-  const stopped = run({ drop: 'sum.activeTime' });
-  assert.notEqual(stopped.status, 0, 'a run the schema stops is red');
-  assert.match(stopped.out, /::error::the account's durableObjectsPeriodicGroups lacks sum\.activeTime/);
-  assert.match(stopped.summary, /\*\*What the account exposes/, 'its schema kept');
-});
+// DFO-83 (2026-11-07): .github/workflows/do-active.yml was removed as part of the inherited-operational-Actions
+// cleanup, along with this file's test of its by-hand dispatch, token guard and reading step - those were pure
+// workflow-content assertions with nothing surviving independent of the deleted file.

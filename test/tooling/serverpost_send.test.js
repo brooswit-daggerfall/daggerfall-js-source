@@ -1,13 +1,13 @@
 // SERVER-POST (2026-10-08, Mac: "... First use is to utilize it for players being granted items.") and HOURS-FIRST
-// ("... and each the gilded gun"): THE POST, SENT BY THE OPERATOR - tools/sendServerPost.mjs writes the statements,
-// .github/workflows/server-post.yml runs them by hand (a dry run, then the send), and the post's first send, the
-// Hourlock to the thirteen of the first clear, is migration 0094 - this file's statement, held to the tool's.
+// ("... and each the gilded gun"): THE POST, SENT BY THE OPERATOR - tools/sendServerPost.mjs writes the statements for
+// an operator to run by hand, and the post's first send, the Hourlock to the thirteen of the first clear, is migration
+// 0094 - this file's statement, held to the tool's.
+// DFO-83 (2026-11-07): .github/workflows/server-post.yml, which used to run the tool's statements by hand from a
+// workflow_dispatch, was removed with the rest of the inherited operational workflows; its contract test went with it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, chmodSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { d1, standService } from '../accountDb.mjs';
 import {
@@ -147,86 +147,4 @@ test('TAMRIEL-POST THE UPDATE\'S LETTER, migration 0188: the tool\'s own stateme
   assert.deepEqual(rec.items, [portalStones(10)], 'all ten in the character\'s record');
   svc.env.DB._raw.exec(mig);
   assert.equal(rows(svc.env.DB, 'SELECT COUNT(*) AS n FROM server_post')[0].n, 2, 'applied again, nothing more');
-});
-
-/** A step's `run: |` block, by its name, as the runner hands it to bash (guildgrant.test.js's reader). */
-function runBlock(yml, stepName) {
-  const at = yml.indexOf(`- name: ${stepName}\n`);
-  assert.ok(at >= 0, `no step named "${stepName}"`);
-  const from = yml.indexOf('run: |\n', at) + 'run: |\n'.length;
-  const lines = [];
-  for (const l of yml.slice(from).split('\n')) {
-    if (l.trim() && !l.startsWith('          ')) break;
-    lines.push(l.slice(10));
-  }
-  return lines.join('\n');
-}
-
-test('SERVER-POST the workflow: run by hand only, a dry run unless asked, its inputs read once each as environment, the item a choice of the tool\'s names, the deploy\'s queue, nothing created or deployed; its steps, run here over D1\'s own answer, write the tool\'s statements, refuse a bad input before the database is asked, fail a name that finds nobody, summarise who holds it, and send only with apply (mutants: an input spliced into a run line; a missing name passing; the send on a dry run)', () => {
-  const wf = src('.github/workflows/server-post.yml');
-  const on = /\non:\n([\s\S]*?)\n\S/.exec(wf)?.[1] ?? '';
-  assert.match(on, /^ {2}workflow_dispatch:/);
-  assert.doesNotMatch(on, /push:|pull_request|schedule:/);
-  assert.match(on, /\n {6}apply:\n(?: {8}.*\n)*? {8}default: false\n/, 'a dry run unless asked');
-  assert.match(on, /\n {6}item:\n(?: {8}.*\n)*? {8}type: choice\n {8}options:\n {10}- none\n {10}- hourlock\n/, 'the tool\'s names, and only those');
-  assert.equal(wf.match(/\$\{\{ inputs\./g)?.length, 6, 'the six inputs, each read once');
-  assert.match(wf, /\n {6}HANDLES: \$\{\{ inputs\.handles \}\}\n {6}BATCH: \$\{\{ inputs\.batch \}\}\n {6}ITEM: \$\{\{ inputs\.item \}\}\n {6}SUBJECT: \$\{\{ inputs\.subject \}\}\n {6}MESSAGE: \$\{\{ inputs\.message \}\}\n {6}APPLY: \$\{\{ inputs\.apply \}\}\n/);
-  assert.match(wf, /\nconcurrency:\n {2}group: server-post\n {2}cancel-in-progress: false\n/);
-  assert.match(wf, /\npermissions:\n {2}contents: read\n/);
-  assert.doesNotMatch(wf, /d1 create|migrations apply|wrangler deploy|--file/, 'it creates, migrates and deploys nothing');
-  assert.equal(wf.match(/if: env\.APPLY == 'true'\n/g)?.length, 1);
-  assert.match(wf, /- name: Send the post\n {8}if: env\.APPLY == 'true'\n/);
-  assert.deepEqual(Object.keys(POST_ITEMS), ['none', 'hourlock'], 'the choice list is the tool\'s');
-
-  const dir = mkdtempSync(join(tmpdir(), 'serverpost-'));
-  const fake = join(dir, 'wrangler');
-  // D1's answer only to the remote database, as JSON - a local or bare read is no answer (AUDIT SERVER-POST)
-  writeFileSync(fake, '#!/usr/bin/env bash\ncase "$*" in *"--remote --json"*) ;; *) echo "not remote json" >&2; exit 9;; esac\ncase "$*" in *"INSERT OR IGNORE"*) cat "$FAKE_DIR/send.json";; *) cat "$FAKE_DIR/look.json";; esac\n');
-  chmodSync(fake, 0o755);
-  const d1Answer = (r) => JSON.stringify([{ results: r, success: true, meta: {} }]);
-  const run = (step, { handles = 'Duck,Terra', batch = 'gift-one', item = 'hourlock', subject = "Hour's First", message = 'For you.', apply = 'false', look = [], send = [] } = {}) => {
-    writeFileSync(join(dir, 'look.json'), d1Answer(look));
-    writeFileSync(join(dir, 'send.json'), d1Answer(send));
-    const summary = join(dir, `summary-${Math.random()}`);
-    writeFileSync(summary, '');
-    const r = spawnSync('bash', ['-c', runBlock(wf, step)], {
-      cwd: fileURLToPath(ROOT),
-      env: { PATH: process.env.PATH, WRANGLER: fake, FAKE_DIR: dir, DB_NAME: 'daggerfall-accounts', RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: summary,
-        HANDLES: handles, BATCH: batch, ITEM: item, SUBJECT: subject, MESSAGE: message, APPLY: apply },
-      encoding: 'utf8',
-    });
-    return { ...r, summary: readFileSync(summary, 'utf8') };
-  };
-
-  let r = run('Write the statements');
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(readFileSync(join(dir, 'names.txt'), 'utf8'), 'duck\nterra\n');
-  assert.equal(readFileSync(join(dir, 'look.sql'), 'utf8'), `${lookSql('Duck,Terra', 'gift-one')}\n`);
-  assert.equal(readFileSync(join(dir, 'send.sql'), 'utf8'), `${sendSql({ handles: 'Duck,Terra', batch: 'gift-one', item: 'hourlock', subject: "Hour's First", body: 'For you.' })}\n`);
-  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'words.json'), 'utf8')), { subject: "Hour's First", body: 'For you.' }, 'the words as they will be sent');
-  for (const bad of [{ item: 'sword' }, { handles: '$(touch pwned)' }, { batch: 'Not A Name' }, { subject: '' }]) {
-    assert.notEqual(run('Write the statements', bad).status, 0, `a bad input stops the run before the database is asked: ${JSON.stringify(bad)}`);
-  }
-  assert.equal(run('Write the statements').status, 0, 'the good statements again');
-
-  const found = [{ handle: 'Duck', handle_lc: 'duck', sent: 0 }, { handle: 'Terra', handle_lc: 'terra', sent: 1 }];
-  r = run('Read the recipients', { look: found });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.summary, /^Send \*\*gift-one\*\*, holding: hourlock\n\nSubject: Hour's First\n\n````text\nFor you\.\n````\n/, 'the send, and its words as they will be sent, in a block of their own');
-  assert.match(r.summary, /\| Duck \|  \|/);
-  assert.match(r.summary, /\| Terra \| yes \|/);
-  assert.match(r.summary, /A dry run: nothing was sent/);
-  assert.doesNotMatch(run('Read the recipients', { look: found, apply: 'true' }).summary, /A dry run/);
-  run('Write the statements', { message: 'Line one.\\nLine two.' });
-  r = run('Read the recipients', { look: [{ handle: 'a|b', handle_lc: 'duck', sent: 0 }, found[1]] });
-  assert.match(r.summary, /````text\nLine one\.\nLine two\.\n````/, '\\n a line');
-  assert.match(r.summary, /\| a\\\|b \|  \|/, 'a `|` in a name cannot break its row');
-  run('Write the statements');
-  r = run('Read the recipients', { look: [found[0]] });
-  assert.equal(r.status, 1, 'a name that finds nobody fails the run');
-  assert.match(r.stdout, /::error::no registered account is named terra - nothing was sent/);
-
-  r = run('Send the post', { apply: 'true', send: [{ id: 'a'.repeat(24), to_id: 'p-duck' }] });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.summary, /\*\*Sent\.\*\* 1 of 2 players were sent it now; the rest already held it\./);
 });

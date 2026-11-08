@@ -116,7 +116,7 @@ test('REAL-GPU: no workflow and no npm script runs the probe - it is a machine\'
   const root = new URL('../../', import.meta.url);
   const dir = new URL('.github/workflows/', root);
   const workflows = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
-  assert.ok(workflows.length > 5, `the workflows read (${workflows.length})`);
+  assert.ok(workflows.length >= 5, `the workflows read (${workflows.length})`);   // DFO-83: 17 obsolete operational workflows were removed, leaving the 5 verification ones
   const runners = workflows.filter((f) => /realGpu|realgpu/.test(readFileSync(new URL(f, dir), 'utf8')));
   assert.deepEqual(runners, [], 'a workflow runs tools/realGpu/');
   const scripts = JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).scripts;

@@ -2,7 +2,7 @@
 // tools/egSpanSolve.mjs crosses every course the span generator lays STEP BY STEP WITH THE REAL MOTOR (player/motor.js
 // PlayerMotor at THE SPAN BUILD on player/collider.js Collider, over the circle's floors and its pieces as scenes/eliteGates/egSpan.js
 // rides them - SD7b's harness the model); a course it does not cross fails, naming its seed, hall, road and step; CI runs
-// 25 seeds a band on every pull request (verify.yml calling eg-sweep.yml), 500 nightly, 500 before every relay deploy.
+// 25 seeds a band on every pull request (verify.yml calling eg-sweep.yml), 500 on a manual eg-sweep.yml dispatch.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -87,20 +87,18 @@ test('EG6a A COURSE NOT CROSSED FAILS, NAMING ITS SEED, HALL, ROAD AND STEP: a p
   assert.match(rep, /the fast build: [\d.]+ s - EG_CROSS_MIN \d+ ms/);
 });
 
-test('EG6a THE SWEEP IN CI: verify.yml (every pull request, every deploy) runs eg-sweep.yml at its `sweep` seeds a band - 25 by default, the law pin\'s golden seeds beside them - in four band jobs beside the shards; eg-sweep.yml runs 500 nightly on its schedule; the relay\'s deploy asks verify for 500 before it drops a player (mutants: the sweep left out of verify; the nightly at a pull request\'s 25; the relay deployed on 25)', () => {
+test('EG6a THE SWEEP IN CI: verify.yml (every pull request) runs eg-sweep.yml at its `sweep` seeds a band - 25 by default, the law pin\'s golden seeds beside them - in four band jobs beside the shards; eg-sweep.yml also takes a manual dispatch at 500 (mutants: the sweep left out of verify; a dispatch at a pull request\'s 25)', () => {
   const v = read('.github/workflows/verify.yml');
   assert.match(v, /\n {6}sweep:\n {8}description: [^\n]+\n {8}type: number\n {8}default: 25\n/, 'verify\'s input: 25 seeds a band');
   assert.match(v, /\n {2}sweep:\n {4}uses: \.\/\.github\/workflows\/eg-sweep\.yml\n {4}with:\n {6}ref: \$\{\{ inputs\.ref \}\}\n {6}seeds: \$\{\{ inputs\.sweep \}\}\n/, 'its sweep job, on the commit it verifies');
   const w = read('.github/workflows/eg-sweep.yml');
-  assert.match(w, /\non:\n {2}workflow_call:\n {4}inputs:\n {6}ref:[\s\S]*?\n {6}seeds:\n[\s\S]*?default: 25\n {2}schedule:\n {4}- cron: "[\d* ]+"\n {2}workflow_dispatch:\n {4}inputs:\n {6}seeds:\n[\s\S]*?default: 500\n/);
+  assert.match(w, /\non:\n {2}workflow_call:\n {4}inputs:\n {6}ref:[\s\S]*?\n {6}seeds:\n[\s\S]*?default: 25\n {2}workflow_dispatch:\n {4}inputs:\n {6}seeds:\n[\s\S]*?default: 500\n/);
+  assert.doesNotMatch(w, /schedule:/, 'DFO-83: the obsolete nightly 500-seed schedule was removed');
   assert.match(w, /matrix:\n {8}band: \[0, 1, 2, 3\]/, 'every band');
   assert.match(w, /fail-fast: false/);
   assert.match(w, /ref: \$\{\{ inputs\.ref \}\}/);
   // PIN MOVED (SWEEP-FAST): and its part of the band's seeds (test/tooling/sweepfast.test.js)
-  assert.match(w, /run: node tools\/egSpanSolve\.mjs --sweep --band \$\{\{ matrix\.band \}\} --seeds \$\{\{ inputs\.seeds \|\| 500 \}\} --golden --part \$\{\{ matrix\.part \}\}\/\$\{\{ matrix\.parts \}\}\n/, 'a scheduled run (no inputs) sweeps the nightly\'s 500');
-  const r = read('.github/workflows/relay-deploy.yml');
-  assert.match(r, /\n {2}verify:\n {4}needs: drift\n {4}if: needs\.drift\.outputs\.deploying == 'true'\n {4}uses: \.\/\.github\/workflows\/verify\.yml\n {4}with:\n {6}build: false\n {6}sweep: 500\n/, '500 seeds a band before a relay deploy');
-  assert.match(r, /\n {2}deploy:\n {4}needs: \[drift, verify\]\n/, 'and the deploy waits on it');
+  assert.match(w, /run: node tools\/egSpanSolve\.mjs --sweep --band \$\{\{ matrix\.band \}\} --seeds \$\{\{ inputs\.seeds \|\| 500 \}\} --golden --part \$\{\{ matrix\.part \}\}\/\$\{\{ matrix\.parts \}\}\n/, 'a manual dispatch with no seeds input falls back to 500');
 });
 
 test('EG6a THE SWEEP\'S HARD COURSES (found sweeping seeds 1 to 500 of every band): a Drum\'s widest roll and a gap of 3.19 m to a round island, the jump pressed at the edge (short of it the motor falls short); a vault\'s side lane laid across the gap before a step, landed on at the step\'s height; two Rails whose travels meet, the next stood on as it slides under (mutants: the jump pressed short of the edge; the side lane refused; the Rail jumped past)', () => {

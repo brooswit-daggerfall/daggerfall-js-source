@@ -5,10 +5,7 @@
 // bible/01-Overview/bugs/Field-Bugs-2026-10-11h.md D1-LOAD.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { DATASET, HOURS_MAX, QUESTIONS, loadHours, loadSql, loadTable } from '../../tools/d1Load.mjs';
 import { standService, T0 } from '../accountDb.mjs';
 import { confirmedSeats, SEAT_ROWS_KEPT_S, SEAT_ROWS_SQL, SEAT_JUDGED_SQL } from '../../server-account/src/townSeats.js';
@@ -55,90 +52,9 @@ test('D1-LOAD the questions: each over the service\'s own dataset and window, ev
   assert.throws(() => loadTable('routes', { errors: [{ message: 'Authentication error' }] }), /carries no rows/);
 });
 
-/** A step's `run:` block, as the runner sees it. */
-function stepRun(yml, stepName) {
-  const at = yml.indexOf(`- name: ${stepName}\n`);
-  assert.ok(at >= 0, `no step named "${stepName}"`);
-  const from = yml.indexOf('run: |\n', at) + 'run: |\n'.length;
-  const lines = [];
-  for (const l of yml.slice(from).split('\n')) {
-    if (l.trim() && !l.startsWith('          ')) break;
-    lines.push(l.slice(10));
-  }
-  return lines.join('\n');
-}
-
-test('D1-LOAD the workflow: run by hand only, its two inputs each read once as environment, its own queue, writing nothing; its insights step ranks the statements as the choice input asks (COST-0: time, reads or writes) and hands wrangler no other; its metrics step, run here as the runner runs it over the SQL API\'s answers, draws every question into the summary and warns - never fails - on a refusal (mutants: the input spliced into a run line; a refusal drawn as a table; the ranking fixed; the ranking unguarded)', () => {
-  const wf = src('.github/workflows/d1-load.yml');
-  const on = /\non:\n([\s\S]*?)\n\S/.exec(wf)?.[1] ?? '';
-  assert.match(on, /^ {2}workflow_dispatch:/);
-  assert.doesNotMatch(on, /push:|pull_request|schedule:/);
-  assert.equal(wf.match(/\$\{\{ inputs\./g)?.length, 2, 'the two inputs, each read once');
-  assert.match(wf, /\n {6}HOURS: \$\{\{ inputs\.hours \}\}\n/);
-  assert.match(wf, /\n {6}SORT_BY: \$\{\{ inputs\.sort_by \}\}\n/);
-  assert.match(wf, /\n {6}sort_by:\n(?: {8}.*\n)*? {8}type: choice\n {8}options:\n {10}- time\n {10}- reads\n {10}- writes\n/, 'COST-0: the ranking a choice of three');
-  assert.match(wf, /\nconcurrency:\n {2}group: d1-load\n {2}cancel-in-progress: false\n/);
-  assert.match(wf, /\npermissions:\n {2}contents: read\n/);
-  assert.doesNotMatch(wf, /d1 create|migrations apply|wrangler deploy|d1 execute/, 'it creates, migrates, deploys and executes nothing');
-  assert.match(stepRun(wf, 'Read D1\'s query insights'), /\$WRANGLER d1 insights "\$DB_NAME" --sort-type sum --sort-by "\$sort"/);
-
-  // COST-0: THE INSIGHTS STEP, run by bash over a wrangler that keeps its arguments and is refused (so no jq is asked):
-  // the ranking asked reaches it, an empty one is time's, and one the choice does not offer never reaches it
-  const wdir = mkdtempSync(join(tmpdir(), 'd1insights-'));
-  const fakeWrangler = join(wdir, 'wrangler');
-  writeFileSync(fakeWrangler, `#!/usr/bin/env bash\necho "$*" >> "$FAKE_ARGS"\necho refused >&2\nexit 1\n`);
-  chmodSync(fakeWrangler, 0o755);
-  let asked = 0;
-  const insights = (sortBy) => {
-    const args = join(wdir, `args-${++asked}.txt`);
-    writeFileSync(args, '');
-    const out = execFileSync('bash', ['-c', stepRun(wf, 'Read D1\'s query insights')], {
-      cwd: wdir, encoding: 'utf8',
-      env: { ...process.env, WRANGLER: fakeWrangler, DB_NAME: 'db', HOURS: '2', SORT_BY: sortBy, FAKE_ARGS: args, GITHUB_STEP_SUMMARY: join(wdir, 'summary.md') },
-    });
-    return { out, args: readFileSync(args, 'utf8') };
-  };
-  assert.match(insights('reads').args, /^d1 insights db --sort-type sum --sort-by reads --limit 30 --timePeriod 1d --json\n$/);
-  assert.match(insights('writes').args, /--sort-by writes /);
-  assert.match(insights('').args, /--sort-by time /, 'an empty input: time');
-  const bad = insights('reads; rm -rf /');
-  assert.equal(bad.args, '', 'a ranking the choice does not offer never reaches wrangler');
-  assert.match(bad.out, /::warning::not a ranking/);
-  assert.match(insights('time').out, /::warning::wrangler d1 insights was refused/, 'a refusal a warning, never a stop');
-
-  // THE METRICS STEP, run by bash over a curl that answers as the SQL API does - each question its own answer
-  const dir = mkdtempSync(join(tmpdir(), 'd1load-'));
-  const fake = join(dir, 'curl');
-  writeFileSync(fake, `#!/usr/bin/env bash
-out=""; data=""
-while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; --data-binary) data="$2"; shift 2;; *) shift;; esac; done
-sql=$(cat "\${data#@}")
-case "$sql" in *"blob2 = 'CRON'"*) cp "$FAKE_DIR/cron.json" "$out"; echo -n "$FAKE_CODE";; *) echo '{"data":[]}' > "$out"; echo -n 200;; esac
-`);
-  chmodSync(fake, 0o755);
-  const root = new URL('../..', import.meta.url).pathname;
-  const run = (cronAnswer, code) => {
-    writeFileSync(join(dir, 'cron.json'), JSON.stringify(cronAnswer));
-    const summary = join(dir, `summary-${code}.md`);
-    writeFileSync(summary, '');
-    const out = execFileSync('bash', ['-c', `set -euo pipefail\n${stepRun(wf, 'Read the service\'s metrics')}`], {
-      cwd: root, encoding: 'utf8',
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, FAKE_DIR: dir, FAKE_CODE: code, HOURS: '2', RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: summary, CLOUDFLARE_API_TOKEN: 'x' },
-    });
-    return { out, summary: readFileSync(summary, 'utf8') };
-  };
-  const ok = run({ data: [{ job: 'cron:seats', firings: 60, failed: 0, d1_wait_s: 1.5, statements: 60, changed: 0, p95_ms: 40 }] }, '200');
-  assert.match(ok.summary, /\*\*Window: the last 2 hour\(s\)/);
-  for (const [, title] of QUESTIONS) assert.ok(ok.summary.includes(`**${title}**`), title);
-  assert.match(ok.summary, /\| cron:seats \| 60 \| 0 \| 1\.5 \| 60 \| 0 \| 40 \|/);
-  const refused = run({ success: false, errors: [{ message: 'Authentication error' }] }, '403');
-  assert.doesNotMatch(refused.summary, /\*\*The clock's jobs\*\*/, 'a refusal is never drawn as a table');
-  assert.match(refused.out, /::warning::the cron question was refused \(HTTP 403\)/);
-  assert.match(refused.summary, /\*\*Minute by minute\*\*/, 'the other questions still answer');
-  // AUDIT PLAN-1000 A7 (relay-load.yml's twin): a refusal whose body carries rows is still a refusal - never drawn
-  const odd = run({ data: [{ job: 'cron:odd', firings: 1, failed: 0, d1_wait_s: 1, statements: 1, changed: 0, p95_ms: 1 }] }, '500');
-  assert.doesNotMatch(odd.summary, /\| cron:odd \|/, 'an HTTP 500 is never drawn, whatever its body');
-});
+// DFO-83 (2026-11-07): .github/workflows/d1-load.yml was removed as part of the inherited-operational-Actions
+// cleanup, along with this file's test of its by-hand dispatch, inputs, insights step and metrics step - those
+// were pure workflow-content assertions with nothing surviving independent of the deleted file.
 
 const ENV = { SEATS_OPEN: 'on' };
 const ANTICLERE = { key: 3021, name: 'Anticlere', region: 21, tier: 'palace', pixel: [402, 151] };

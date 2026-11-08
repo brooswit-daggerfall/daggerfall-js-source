@@ -355,14 +355,8 @@ test('F4: a found stack of ammunition is never promoted, because promoting it wo
   assert.equal(rarityEligible(createThunderlock()), true, 'the weapon itself still rolls');
 });
 
-test('F6: the deploy does not point a loaded gun at production', () => {
-  const yml = readFileSync('.github/workflows/deploy.yml', 'utf8');
-  // checking out a FEATURE BRANCH by name means deleting that branch
-  // after the merge fails the step and takes the whole Pages deploy
-  // down with it - the game's, not only the lab's
-  assert.ok(!/ref:\s*claude\//.test(yml), 'no feature branch is checked out by name');
-  assert.match(yml, /Build gun lab[\s\S]*?working-directory: production/, 'the lab builds from the production checkout');
-});
+// DFO-83 (2026-11-07): F6's deploy.yml test (the gun lab building from the production checkout, with no feature
+// branch checked out by name) was removed with that workflow.
 
 test('F8: the game plays the weapon’s own clips - all four hosts, through the mod-sound door', async () => {
   // A SOUND NOBODY HEARS IS NOT A SOUND. The clips were baked,

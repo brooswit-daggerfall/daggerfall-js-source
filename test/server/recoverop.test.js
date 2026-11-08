@@ -141,18 +141,6 @@ test('RECOVER-OP: the tool refuses anything that is not a username or not a hash
   assert.ok(await verifyPassword(codeForHashing(printed), printedHash, { subtle }), 'the printed code opens the printed hash');
 });
 
-test('RECOVER-OP the workflow: run by hand only, its inputs reach the scripts as environment and never spliced into a run line, the statement is the tool\'s, the deploy\'s queue, and a run that changed no row fails', () => {
-  const wf = src('.github/workflows/account-recovery.yml');
-  const on = /\non:\n([\s\S]*?)\n\S/.exec(wf)?.[1] ?? '';
-  assert.match(on, /^ {2}workflow_dispatch:/);
-  assert.doesNotMatch(on, /push:|pull_request|schedule:/);
-  assert.equal(wf.match(/\$\{\{ inputs\./g)?.length, 2, 'the two inputs, each read once');
-  assert.match(wf, /\n {6}HANDLE: \$\{\{ inputs\.handle \}\}\n {6}HASH: \$\{\{ inputs\.hash \}\}\n/);
-  assert.match(wf, /node tools\/reissueRecoveryCode\.mjs --sql "\$HANDLE" "\$HASH" > "\$RUNNER_TEMP\/reissue\.sql"/);
-  assert.match(wf, /\nconcurrency:\n {2}group: account-deploy\n {2}cancel-in-progress: false\n/);
-  assert.match(wf, /\npermissions:\n {2}contents: read\n/);
-  assert.doesNotMatch(wf, /d1 create|migrations apply/, 'it creates and migrates nothing');
-  assert.match(wf, /d1 execute "\$DB_NAME" --remote --json --command "\$\(cat "\$RUNNER_TEMP\/reissue\.sql"\)"/);
-  assert.match(wf, /if \[ "\$n" != "1" \]; then\n\s+echo "::error::no registered account is named \$HANDLE - nothing was changed"\n\s+exit 1/);
-  assert.match(wf, /never the code itself/);
-});
+// DFO-83 (2026-11-07): .github/workflows/account-recovery.yml was removed as part of the inherited-operational-Actions
+// cleanup, along with this file's test of its by-hand dispatch and D1 statement run - that was a pure workflow-content
+// assertion with nothing surviving independent of the deleted file.

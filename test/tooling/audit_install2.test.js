@@ -11,105 +11,18 @@
 // the notes come off the pull requests now (test/tooling/rel4_release.test.js).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fsModule, { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import fsModule, { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const rd = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
 
-// ---- the workflows, read as GitHub reads them -------------------------------
-
-const WORKFLOWS = readdirSync(new URL('../../.github/workflows/', import.meta.url)).filter((f) => f.endsWith('.yml')).sort();
-/** A workflow's jobs, each from its two-space `name:` line to the next. */
-const jobsOf = (wf) => [...wf.slice(wf.indexOf('\njobs:\n')).matchAll(/\n {2}([A-Za-z0-9_-]+):\n([\s\S]*?)(?=\n {2}[A-Za-z0-9_-]+:\n|$)/g)]
-  .map((m) => ({ name: m[1], text: m[2] }));
-/** A job's steps, each from its `      - ` line to the next. */
-const stepsOf = (job) => {
-  const at = job.indexOf('\n    steps:\n');
-  return at < 0 ? [] : job.slice(at + '\n    steps:\n'.length).split(/\n(?= {6}- )/).filter((s) => /^ {6}- /.test(s));
-};
-/** A step's script: the inline value of its `run:`, or the block under it (the lines indented past the key). */
-const runOf = (step) => {
-  const lines = step.split('\n');
-  const i = lines.findIndex((l) => /^ {6}(?:- | {2})run:/.test(l));
-  if (i < 0) return null;
-  const inline = lines[i].replace(/^ {6}(?:- | {2})run:\s*/, '');
-  if (!/^[|>][-+]?\s*$/.test(inline)) return inline;
-  const block = [];
-  for (const l of lines.slice(i + 1)) {
-    if (l.trim() && !/^ {9,}/.test(l)) break;
-    block.push(l);
-  }
-  return block.join('\n');
-};
-const nameOf = (step) => /^ {6}(?:- | {2})name: (.*)$/m.exec(step)?.[1] ?? step.split('\n')[0].trim();
-
-test('R2-B1: a step that reads a shell variable names its shell wherever a leg can be Windows - there `run` is PowerShell, and "$VERSION" is not the environment', () => {
-  // L1-5 moved the version out of the stamp's script and into its
-  // environment - right for bash, and silently wrong on windows-latest,
-  // whose default shell is pwsh: "$VERSION" is an unset PowerShell
-  // variable ($env:VERSION is the environment), npm got "" (or nothing),
-  // the Windows leg failed or stamped 0.1.0, and `publish` - which needs
-  // every leg - never ran. A script's dialect is the shell's, so any script
-  // that reads a variable says which shell it is written for.
-  let windowsJobs = 0;
-  const unnamed = [];
-  for (const f of WORKFLOWS) {
-    const wf = rd(`.github/workflows/${f}`);
-    const wfBash = /\ndefaults:\n {2}run:\n {4}shell: bash\n/.test(wf);
-    for (const job of jobsOf(wf)) {
-      if (!/\bwindows-(?:latest|\d+)\b/.test(job.text)) continue;
-      windowsJobs++;
-      const jobShell = wfBash || /\n {4}defaults:\n {6}run:\n {8}shell: \w+\n/.test(job.text);
-      for (const step of stepsOf(job.text)) {
-        const script = runOf(step);
-        if (script === null || !/\$(?!\{\{)/.test(script)) continue;
-        if (!jobShell && !/^ {8}shell: \w+/m.test(step)) unnamed.push(`${f} ${job.name}: "${nameOf(step)}"`);
-      }
-    }
-  }
-  assert.ok(windowsJobs >= 1, 'the desktop build has a Windows leg - this law is not vacuous');
-  assert.deepEqual(unnamed, [], 'a script that reads a variable runs in whatever shell the leg defaults to');
-  const build = jobsOf(rd('.github/workflows/release-desktop.yml')).find((j) => j.name === 'build');
-  const stamp = stepsOf(build.text).find((s) => nameOf(s) === 'Stamp the version');
-  assert.match(stamp, /^ {8}shell: bash$/m, 'the stamp is bash on every leg');
-  assert.equal(runOf(stamp), 'npm version "$VERSION" --no-git-tag-version --allow-same-version', 'and reads the environment, never pasted text (L1-5)');
-});
-
-test('R2-B4: an action nobody at GitHub owns is pinned to a commit - the release job holds contents: write, and the launcher installs what it publishes', () => {
-  const loose = [];
-  let thirdParty = 0;
-  for (const f of WORKFLOWS) {
-    for (const m of rd(`.github/workflows/${f}`).matchAll(/^\s*(?:- )?uses: ([^\s#]+)(.*)$/gm)) {
-      const [, ref, rest] = m;
-      if (ref.startsWith('./') || ref.startsWith('actions/')) continue;
-      thirdParty++;
-      const [, sha] = /@([^@]+)$/.exec(ref) ?? [];
-      if (!/^[0-9a-f]{40}$/.test(sha ?? '') || !/^\s+# v\d+\.\d+\.\d+$/.test(rest)) loose.push(`${f}: ${ref}${rest}`);
-    }
-  }
-  assert.ok(thirdParty >= 1, 'softprops is third-party - this law is not vacuous');
-  assert.deepEqual(loose, [], 'a tag can be moved under the job; a commit cannot - and the comment says which release it was');
-  assert.match(rd('.github/workflows/release-desktop.yml'), /uses: softprops\/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2\.6\.2\n/,
-    'the commit v2 and v2.6.2 both named (git ls-remote, 2026-09-29)');
-});
-
-test('R2-C2: a draft a failed run left at the tag is deleted before staging - softprops would keep it, with its old notes and its old commit', () => {
-  const wf = rd('.github/workflows/release-desktop.yml');
-  const publish = jobsOf(wf).find((j) => j.name === 'publish');
-  const steps = stepsOf(publish.text);
-  const guard = steps.findIndex((s) => nameOf(s) === 'The tag has no published release, and no draft left over');
-  const stage = steps.findIndex((s) => /uses: softprops\/action-gh-release@/.test(s));
-  assert.ok(guard >= 0 && stage > guard, 'the guard stands before anything is staged');
-  const script = runOf(steps[guard]);
-  // an ASSIGNMENT, so a listing that fails fails the step (bash -e) - a `for` over a failed $(...) would carry on
-  assert.match(script, /\n\s*LEFT=\$\(gh api --paginate "repos\/\$RELEASE_REPO\/releases\?per_page=100" --jq '\.\[\] \| select\(\.draft and \.tag_name == env\.TAG\) \| \.id'\)\n/,
-    'every page: softprops itself only scans two');
-  assert.match(script, /for ID in \$LEFT; do\s*gh api -X DELETE "repos\/\$RELEASE_REPO\/releases\/\$ID" --silent/);
-  assert.ok(script.indexOf('LEFT=') > script.indexOf("grep -q 'HTTP 404' lookup-error.txt"), 'only once the tag is known to have no published release');
-  assert.match(steps[stage], /target_commitish: \$\{\{ steps\.host\.outputs\.target \}\}/, 'staged afresh, the tag is cut where these files were built (AUDIT 68; the host step names that commit)');
-});
+// DFO-83 (2026-11-07): R2-B1 (a Windows leg's shell safety), R2-B4 (third-party actions pinned to a commit) and R2-C2
+// (the release publish job's duplicate-draft guard) read release-desktop.yml, the repo's only workflow with a Windows
+// leg or a third-party action; it was removed with the rest of the inherited operational workflows, and none of the
+// retained workflows (check/verify/test-times/eg-sweep/intro-quality) have a Windows leg or a non-actions/ dependency
+// for these findings to still check - so their helpers (jobsOf/stepsOf/runOf/nameOf/WORKFLOWS) went with them.
 
 // ---- the launcher's fences ---------------------------------------------------
 
@@ -525,7 +438,7 @@ test('R2-E (E-43..E-47): the places a copy of Daggerfall is installed - each one
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('R2-E (E-32..E-42, E-52..E-54): the shell\'s and the workflow\'s wiring the suite never read', () => {
+test('R2-E (E-32..E-42): the shell\'s wiring the suite never read', () => {
   // E-32: Play is heard once - the launch is marked before the game's window is built, or the next event opens another
   assert.match(body('function launchGame()'), /^function launchGame\(\) \{\s*launcherDispatch\(\{ type: 'launching' \}\);/);
   // E-33: the launcher is shown (built hidden, shown when ready)
@@ -540,15 +453,6 @@ test('R2-E (E-32..E-42, E-52..E-54): the shell\'s and the workflow\'s wiring the
   const news = body('async function fetchNews()');
   assert.match(news, /signal: AbortSignal\.timeout\(10000\),/);
   assert.ok(news.indexOf("if (!res.ok) throw new Error(`HTTP ${res.status}`);") >= 0 && news.indexOf("if (!res.ok) throw new Error(`HTTP ${res.status}`);") < news.indexOf('saveNews(items);'));
-  // E-52: no ${{ }} text reaches ANY script in the release workflow - multi-line blocks included (L1-5's pin read one line)
-  const wf = rd('.github/workflows/release-desktop.yml');
-  const pasted = jobsOf(wf).flatMap((j) => stepsOf(j.text).map((s) => [nameOf(s), runOf(s)])).filter(([, run]) => run && /\$\{\{/.test(run));
-  assert.deepEqual(pasted, [], 'every value a script reads comes through its env');
-  // E-53: an artifacts-only run stamps nothing - `npm version ""` would fail the leg
-  const build = jobsOf(wf).find((j) => j.name === 'build');
-  assert.match(stepsOf(build.text).find((s) => nameOf(s) === 'Stamp the version'), /\n {8}if: needs\.version\.outputs\.version != ''\n/);
-  // E-54: no signing identity is hunted for on the Mac leg
-  assert.match(build.text, /\n {4}env:\n(?: {6}#[^\n]*\n)* {6}CSC_IDENTITY_AUTO_DISCOVERY: 'false'\n/);
-  // REL9: every leg builds the site with a 4GB heap - the Mac runner's default (~2GB) died in vite build and no release published
-  assert.match(build.text, /\n {4}env:\n(?: {6}[^\n]*\n)*? {6}NODE_OPTIONS: --max-old-space-size=4096\n(?: {6}[^\n]*\n)* {4}steps:\n/);
+  // DFO-83 (2026-11-07): E-52/E-53/E-54 and REL9, about release-desktop.yml's own script text, env and build legs,
+  // were removed along with that workflow with the rest of the inherited operational automation.
 });

@@ -4,10 +4,8 @@
 // ever broken unless a slot is asked. It reads only.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, chmodSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { d1 } from '../../accountDb.mjs';
 import { createGuest } from '../../../server-account/src/accounts.js';
@@ -105,78 +103,6 @@ test('SD-CLEARS the tool: only a whole slot from 1, nothing else reaches the sta
   }
 });
 
-/** A step's `run: |` block, by its name, as the runner hands it to bash (guildgrant.test.js's reader). */
-function runBlock(yml, stepName) {
-  const at = yml.indexOf(`- name: ${stepName}\n`);
-  assert.ok(at >= 0, `no step named "${stepName}"`);
-  const from = yml.indexOf('run: |\n', at) + 'run: |\n'.length;
-  const lines = [];
-  for (const l of yml.slice(from).split('\n')) {
-    if (l.trim() && !l.startsWith('          ')) break;
-    lines.push(l.slice(10));
-  }
-  return lines.join('\n');
-}
-
-test('SD-CLEARS the workflow: run by hand only, its one input read once as environment, the tool\'s statements in the deploy\'s queue, writing nothing; its steps, run here as the runner runs them over D1\'s own answer, list the Hollows broken and name the one asked, and fail when nothing is found (mutants: the input spliced into a run line; an empty answer passing)', () => {
-  const wf = src('.github/workflows/sd-clears.yml');
-  const on = /\non:\n([\s\S]*?)\n\S/.exec(wf)?.[1] ?? '';
-  assert.match(on, /^ {2}workflow_dispatch:/);
-  assert.doesNotMatch(on, /push:|pull_request|schedule:/);
-  assert.match(on, /\n {6}slot:\n(?: {8}.*\n)*? {8}required: false\n/, 'the first broken unless a slot is asked');
-  assert.equal(wf.match(/\$\{\{ inputs\./g)?.length, 1, 'the one input, read once');
-  assert.match(wf, /\n {6}SLOT: \$\{\{ inputs\.slot \}\}\n/);
-  assert.match(wf, /\nconcurrency:\n {2}group: sd-clears\n {2}cancel-in-progress: false\n/);
-  assert.match(wf, /\npermissions:\n {2}contents: read\n/);
-  assert.doesNotMatch(wf, /d1 create|migrations apply|wrangler deploy|--file/, 'it creates, migrates, deploys and runs no file of its own');
-
-  // THE STEPS, run by bash over a wrangler that answers as D1 does (the list's rows, or the names')
-  const dir = mkdtempSync(join(tmpdir(), 'sdclears-'));
-  const fake = join(dir, 'wrangler');
-  writeFileSync(fake, '#!/usr/bin/env bash\ncase "$*" in *"GROUP BY slot"*) cat "$FAKE_DIR/list.json";; *) cat "$FAKE_DIR/names.json";; esac\n');
-  chmodSync(fake, 0o755);
-  const d1Answer = (r) => JSON.stringify([{ results: r, success: true, meta: {} }]);
-  const run = (step, { slot = '', list = [], names = [] } = {}) => {
-    writeFileSync(join(dir, 'list.json'), d1Answer(list));
-    writeFileSync(join(dir, 'names.json'), d1Answer(names));
-    const summary = join(dir, `summary-${Math.random()}`);
-    writeFileSync(summary, '');
-    const r = spawnSync('bash', ['-c', runBlock(wf, step)], {
-      cwd: fileURLToPath(ROOT),
-      env: { PATH: process.env.PATH, WRANGLER: fake, FAKE_DIR: dir, DB_NAME: 'daggerfall-accounts', RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: summary, SLOT: slot },
-      encoding: 'utf8',
-    });
-    return { ...r, summary: readFileSync(summary, 'utf8') };
-  };
-
-  let r = run('Write the statements');
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(readFileSync(join(dir, 'list.sql'), 'utf8'), `${listSql()}\n`);
-  assert.equal(readFileSync(join(dir, 'names.sql'), 'utf8'), `${namesSql()}\n`, 'no slot: the first broken');
-  assert.equal(run('Write the statements', { slot: '2' }).status, 0);
-  assert.equal(readFileSync(join(dir, 'names.sql'), 'utf8'), `${namesSql(2)}\n`);
-  assert.notEqual(run('Write the statements', { slot: '1; DROP TABLE sd_kills' }).status, 0, 'a bad slot stops the run before the database is asked');
-  assert.notEqual(run('Write the statements', { slot: '$(touch pwned)' }).status, 0);
-
-  r = run('Read the clears', { list: [{ slot: 1, fighters: 3, first_at: T0 + 30 }, { slot: 2, fighters: 1, first_at: T0 + 9000 }] });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.summary, /\*\*Abyss Dungeons broken\*\*/);
-  assert.match(r.summary, /\| 1 \| 3 \| 2027-01-15T08:00:30Z \|/);
-  assert.match(r.summary, /\| 2 \| 1 \| 2027-01-15T10:30:00Z \|/);
-  r = run('Read the clears', { list: [] });
-  assert.equal(r.status, 1, 'nothing broken fails the run');
-  assert.match(r.stdout, /::error::no Abyss Dungeon has been broken yet/);
-
-  r = run('Read the names', { names: [
-    { slot: 1, name: 'Bram', earned: 'stood', lv: 12, title: 0, aura: 1, at: T0 + 30 },
-    { slot: 1, name: 'Vex', earned: 'dealt', lv: 30, title: 1, aura: 0, at: T0 + 60 },
-  ] });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.summary, /\*\*Slot 1: 2 accounts\*\*/);
-  assert.match(r.summary, /\| Bram \| stood \| 12 \|  \| yes \| 2027-01-15T08:00:30Z \|/);
-  assert.match(r.summary, /\| Vex \| dealt \| 30 \| yes \|  \| 2027-01-15T08:01:00Z \|/);
-  assert.match(r.stdout, /\| Bram \|/, 'the names in the log as well');
-  r = run('Read the names', { slot: '9', names: [] });
-  assert.equal(r.status, 1, 'a slot nobody claimed fails the run');
-  assert.match(r.stdout, /::error::no claim names slot 9/);
-});
+// DFO-83 (2026-11-07): .github/workflows/sd-clears.yml was removed as part of the inherited-operational-Actions
+// cleanup, along with this file's test of its by-hand dispatch and its steps over D1's answer - that was a pure
+// workflow-content assertion with nothing surviving independent of the deleted file.

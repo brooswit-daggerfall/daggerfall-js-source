@@ -508,7 +508,7 @@ test('DA13: a readied version is switched to only by a navigation that can commi
   assert.equal(switchesReadyGame({ isMainFrame: true, isSameDocument: false }), false, 'no url: not the game\'s');
 });
 
-test('DA13: the release pipeline - one shell id, the bundled game indexed in every installer, the pack cut once beside them, and the publish step that fails an update that is no longer per file', () => {
+test('DA13: the release pipeline - one shell id, the bundled game packed into the shell\'s own files, and the judgement that fails an update that is no longer per file', () => {
   // the shell is app/ and what its build takes from outside it - derived from the build config, never a list to forget
   assert.deepEqual(shellInputs(), ['app', 'public/icons/icon-512.png', 'src/ui/menu/menuPad.js', 'src/assets/branding/dfo-online.png']);
   assert.deepEqual(shellInputs({ build: {} }, [{ from: 'src/a.js', to: 'app/a.js' }, { from: 'dist', to: 'app/dist' }]), ['app', 'src/a.js'], 'a staged file is the shell\'s; the staged game is the channel\'s');
@@ -520,22 +520,11 @@ test('DA13: the release pipeline - one shell id, the bundled game indexed in eve
   assert.notEqual(shellId((args) => ({ ...objects, 'HEAD:src/x/a.js': 'b2' })[args[1]], 'HEAD', ['app', 'src/x/a.js']), id, 'any input changed, another id');
   // the release carries the game, and a set without it publishes nothing
   assert.ok(EXPECTED_RELEASE_FILES.includes(G.GAME_FILES.manifest) && EXPECTED_RELEASE_FILES.includes(G.GAME_FILES.pack));
-  const wf = rd('.github/workflows/release-desktop.yml');
-  assert.match(wf, /SHELL_ID=\$\(node scripts\/desktopRelease\.mjs shell\)\n\s+if ! \[\[ "\$SHELL_ID" =~ \^\[0-9a-f\]\{64\}\$ \]\]; then/, 'derived once, in the version job, held to its shape');
-  assert.match(wf, /\n\s+shell: \$\{\{ steps\.reltag\.outputs\.shell \}\}\n/);
-  const build = wf.slice(wf.indexOf('\n  build:\n'), wf.indexOf('\n  publish:\n'));
-  assert.match(build, /- name: Index the bundled game\n\s+if: needs\.version\.outputs\.tag != ''\n\s+shell: bash\n\s+env:\n\s+VERSION: \$\{\{ needs\.version\.outputs\.version \}\}\n\s+DFO_SHELL: \$\{\{ needs\.version\.outputs\.shell \}\}\n\s+run: node scripts\/desktopRelease\.mjs seed dist app\/game-seed\.json/,
-    'every leg indexes the game it bundles - on a release only (a "try this build" follows no channel)');
-  assert.ok(build.indexOf('- name: Index the bundled game') < build.indexOf('- name: Build installers'), 'before electron-builder packs it');
+  // DFO-83 (2026-11-07): release-desktop.yml's own shell-id derivation, index/pack build steps and publish-staging
+  // order were removed along with that workflow with the rest of the inherited operational automation. What
+  // survives below is the shell's own packaging config, independent of any CI workflow.
   assert.ok(JSON.parse(rd('app/package.json')).build.files.includes('game-seed.json'), 'and electron-builder packs it into the shell');
   assert.match(rd('.gitignore'), /\napp\/game-seed\.json\n/, 'never committed');
-  assert.match(build, /- name: Pack the game\n\s+if: needs\.version\.outputs\.tag != '' && matrix\.os == 'ubuntu-latest'\n\s+shell: bash\n[\s\S]*?run: node scripts\/desktopRelease\.mjs pack dist app\/release\n/, 'cut once, by one leg');
-  assert.match(build, /app\/release\/DFO-Online-game\.\*\n/, 'and handed on with the installers');
-  const publish = wf.slice(wf.indexOf('\n  publish:\n'));
-  const delta = publish.slice(publish.indexOf('- name: The game\'s update is the files that changed'), publish.indexOf('- name: Write the notes'));
-  assert.match(delta, /node scripts\/desktopRelease\.mjs delta previous\/DFO-Online-game\.json\.gz release\/DFO-Online-game\.json\.gz "\$PREV"/);
-  assert.ok(publish.indexOf('- name: The set is whole') < publish.indexOf('- name: The game\'s update is the files that changed')
-    && publish.indexOf('- name: The game\'s update is the files that changed') < publish.indexOf('- name: Stage the release as a draft'), 'measured before anything is staged');
   // the judgement: most of the game again, or a shell id that moved with no shell file changed, fails the release
   const m = (shell, files, size = 1000) => ({ shell, version: '0.1.1', pack: { size }, files });
   const f = (sha256, length) => ({ path: sha256, sha256, length });

@@ -126,9 +126,6 @@ test('STAR7 THE MIGRATION AND THE DEPLOY: stars_held and star_spoils, one row a 
   s.raw.prepare('DELETE FROM players WHERE id = ?').run(ann.id);
   assert.equal(s.raw.prepare('SELECT COUNT(*) AS n FROM stars_held').get().n, 0, 'gone with its account');
   assert.equal(s.raw.prepare('SELECT COUNT(*) AS n FROM star_spoils').get().n, 0);
-  const deploy = src('.github/workflows/account-deploy.yml');
-  assert.match(deploy, /- "src\/net\/starfall\/starReceipt\.js"/);
-  assert.match(deploy, /- "src\/net\/starfall\/starfallLaw\.js"/);
 });
 
 test('AUDIT STARFALL B3: AN ANSWER LOST AFTER THE BATCH - the fill (INT5) rides the claim\'s own batch, by its row alone; a 5xx past the batch keeps the row, the Renown, the silver and the fill, and the retry is `claimed` with what the lost answer said - the row is this device\'s own (its claim id), the count, the Renown the row credited its character - never to another device\'s claim, and paying nothing again (mutants: B3-the-fill-after-the-batch; B3-the-fill-unguarded; B3-own-for-every-device; B3-the-snapshot-unsaid; B3-the-row-unstamped)', async () => {

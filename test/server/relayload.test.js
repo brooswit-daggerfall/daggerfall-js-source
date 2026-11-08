@@ -5,10 +5,7 @@
 // widened every pin below to reach what its title claims.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { DATASET, QUESTIONS, WINDOW_KINDS, WINDOW_HOURS_MAX, loadSql, loadTable } from '../../tools/relayLoad.mjs';
 import { HOURS_MAX } from '../../tools/d1Load.mjs';
 import { RoomMetrics } from '../../server/src/relayScale.js';
@@ -95,100 +92,6 @@ test('RELAY-LOAD the questions: each over the relay\'s own dataset and window, i
   assert.throws(() => loadTable('kinds', { errors: [{ message: 'Authentication error' }] }), /carries no rows/);
 });
 
-/** A step's `run:` block, as the runner sees it. */
-function stepRun(yml, stepName) {
-  const at = yml.indexOf(`- name: ${stepName}\n`);
-  assert.ok(at >= 0, `no step named "${stepName}"`);
-  const from = yml.indexOf('run: |\n', at) + 'run: |\n'.length;
-  const lines = [];
-  for (const l of yml.slice(from).split('\n')) {
-    if (l.trim() && !l.startsWith('          ')) break;
-    lines.push(l.slice(10));
-  }
-  return lines.join('\n');
-}
-/** A step's own block, from its name to the next step. */
-const stepOf = (yml, stepName) => { const at = yml.indexOf(`- name: ${stepName}\n`); const end = yml.indexOf('\n      - ', at + 1); return yml.slice(at, end < 0 ? undefined : end); };
-
-test('RELAY-LOAD the workflow: run by hand only, its one input read once as environment, its own queue, writing nothing, the token the two steps\' that use it and never the job\'s; the token step refuses to start without one and asks the tool before any question; its metrics step, run here as the runner runs it over an SQL API that holds it to its URL and method, draws every question into the summary under the window the SQL asks (an empty input the tool\'s own hour), and warns on a refusal - the token named only where the API refused it (AUDIT PLAN-1000 H3) - a refusal never drawn even when its body carries rows; a run that read nothing fails, its partial summary kept (H3); the step runs as written, strict, each call bounded and the job too (H10) (mutants: the input spliced into a run line; a refusal drawn; the token the job\'s; the token step\'s guard; the URL; the method; the window said; the token blamed for any answer; nothing read and green; the step not strict; the call unbounded; the job unbounded; the last warning gone)', () => {
-  const wf = src('.github/workflows/relay-load.yml');
-  const on = /\non:\n([\s\S]*?)\n\S/.exec(wf)?.[1] ?? '';
-  assert.match(on, /^ {2}workflow_dispatch:/);
-  assert.doesNotMatch(on, /push:|pull_request|schedule:/);
-  assert.equal(wf.match(/\$\{\{ inputs\./g)?.length, 1, 'the one input, read once');
-  assert.match(wf, /\n {6}HOURS: \$\{\{ inputs\.hours \}\}\n/);
-  assert.match(wf, /\nconcurrency:\n {2}group: relay-load\n {2}cancel-in-progress: false\n/);
-  assert.match(wf, /\npermissions:\n {2}contents: read\n/);
-  assert.match(wf, /\n {4}timeout-minutes: 10\n/, 'AUDIT PLAN-1000 H10: the job bounded');
-  assert.match(stepOf(wf, 'Read the relay\'s metrics'), /run: \|\n {10}set -euo pipefail\n/, 'the step strict on its own');
-  assert.match(stepOf(wf, 'Read the relay\'s metrics'), /curl -sS --max-time 60 /, 'each call bounded');
-  assert.doesNotMatch(wf, /wrangler(@\d)? (deploy|d1)|migrations apply|d1 execute/, 'it deploys, migrates and executes nothing');
-  // AUDIT PLAN-1000 A10: the token is the two steps' alone
-  const job = wf.slice(wf.indexOf('\njobs:'), wf.indexOf('\n    steps:'));
-  assert.doesNotMatch(job, /CLOUDFLARE_API_TOKEN/, 'never the job\'s');
-  assert.equal(wf.match(/CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}/g)?.length, 2);
-  for (const name of ['Refuse to start without a token', 'Read the relay\'s metrics']) assert.match(stepOf(wf, name), /\n {8}env:\n {10}CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}\n/, name);
-
-  const root = new URL('../..', import.meta.url).pathname;
-  const dir = mkdtempSync(join(tmpdir(), 'relayload-'));
-  // THE TOKEN STEP: no token, a refusal; a token, the tool asked (its window's guard) before any question
-  const guard = (token, hours) => {
-    try { return { code: 0, out: execFileSync('bash', ['-c', stepRun(wf, 'Refuse to start without a token')], { cwd: root, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, CLOUDFLARE_API_TOKEN: token, HOURS: hours } }) }; } catch (e) { return { code: e.status, out: `${e.stdout}` }; }
-  };
-  const none = guard('', '2');
-  assert.equal(none.code, 1);
-  assert.match(none.out, /::error::secrets\.CLOUDFLARE_API_TOKEN is not set/);
-  assert.equal(guard('x', '2').code, 0);
-  assert.notEqual(guard('x', "1' HOUR; --").code, 0, 'a window the tool refuses stops the run before any question');
-
-  // THE METRICS STEP over an SQL API that is held to its URL and its method
-  const fake = join(dir, 'curl');
-  writeFileSync(fake, `#!/usr/bin/env bash
-out=""; data=""; url=""; method=""
-while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; --data-binary) data="$2"; shift 2;; -X) method="$2"; shift 2;; -H|-w|--max-time) shift 2;; -*) shift;; *) url="$1"; shift;; esac; done
-[ "$method" = "POST" ] || { echo "not a POST: $method" >&2; exit 9; }
-[ "$url" = "https://api.cloudflare.com/client/v4/accounts/$FAKE_ACCT/analytics_engine/sql" ] || { echo "not the SQL API: $url" >&2; exit 9; }
-sql=$(cat "\${data#@}")
-[ -n "$FAKE_ALL" ] && { echo '{"success":false,"errors":[{"message":"refused"}]}' > "$out"; echo -n "$FAKE_ALL"; exit 0; }
-case "$sql" in *"ORDER BY peak DESC"*) cp "$FAKE_DIR/crowds.json" "$out"; echo -n "$FAKE_CODE";; *) echo '{"data":[]}' > "$out"; echo -n 200;; esac
-`);
-  chmodSync(fake, 0o755);
-  const acct = src('server/wrangler.toml').match(/^account_id\s*=\s*"([^"]+)"/m)[1];
-  const run = (answer, code, hours = '2', all = '') => {
-    writeFileSync(join(dir, 'crowds.json'), JSON.stringify(answer));
-    const summary = join(dir, `summary-${code}-${hours}-${all}.md`);
-    writeFileSync(summary, '');
-    let out, status = 0;
-    try {
-      out = execFileSync('bash', ['-c', stepRun(wf, 'Read the relay\'s metrics')], {   // H10: as written - its own `set -euo pipefail`
-        cwd: root, encoding: 'utf8', stdio: 'pipe',
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, FAKE_DIR: dir, FAKE_CODE: code, FAKE_ALL: all, FAKE_ACCT: acct, HOURS: hours, RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: summary, CLOUDFLARE_API_TOKEN: 'x' },
-      });
-    } catch (e) { out = `${e.stdout}`; status = e.status; }
-    return { out, status, summary: readFileSync(summary, 'utf8') };
-  };
-  const row = { stamp: '2026-10-18 14:35:00', kind: 'gate', peak: 180, sockets: 170, hellos: 190, busy: 75, room_full: 0, drops: 0, poses: 30000, sends: 900000 };
-  const ok = run({ data: [row] }, '200');
-  assert.match(ok.summary, /\*\*Window: the last 2 hour\(s\)/);
-  for (const [, title] of QUESTIONS) assert.ok(ok.summary.includes(`**${title}**`), title);
-  assert.match(ok.summary, /\| 2026-10-18 14:35:00 \| gate \| 180 \| 170 \| 190 \| 75 \| 0 \| 0 \| 30,000 \| 900,000 \|/);
-  assert.match(run({ data: [] }, '200', '').summary, /\*\*Window: the last 1 hour\(s\)/, 'an empty input: the hour the SQL asks, said as it');
-  const refused = run({ success: false, errors: [{ message: 'Authentication error' }] }, '403');
-  assert.doesNotMatch(refused.summary, /\*\*The busiest rooms/, 'a refusal is never drawn as a table');
-  assert.match(refused.out, /::warning::the crowds question was refused \(HTTP 403\) - the token needs Account Analytics: Read/);
-  assert.match(refused.out, /::warning::some readings are missing from the summary/, 'and the run says so at its end');
-  assert.equal(refused.status, 0, 'a reading in part is a reading');
-  assert.match(refused.summary, /\*\*Every five minutes, by kind/, 'the other questions still answer');
-  // AUDIT PLAN-1000 H3: SQL the API would not run is not the token's fault, and a run that read nothing is red
-  const sql = run({ success: false }, '422');
-  assert.match(sql.out, /::warning::the crowds question was not answered \(HTTP 422\) - the API's own words follow/);
-  assert.doesNotMatch(sql.out, /crowds question[^\n]*Account Analytics/, 'the token blamed for no 422');
-  const nothing = run({ data: [] }, '200', '2', '403');
-  assert.equal(nothing.status, 1, 'nothing read: red');
-  assert.match(nothing.out, /::error::no question was answered/);
-  assert.match(nothing.summary, /\*\*Window: the last 2 hour\(s\)/, 'its partial summary kept');
-  // AUDIT PLAN-1000 A7: a refusal whose body carries rows is still a refusal - the status, not the shape, says so
-  const odd = run({ data: [row] }, '500');
-  assert.doesNotMatch(odd.summary, /\| 2026-10-18 14:35:00 \| gate \|/, 'an HTTP 500 is never drawn, whatever its body');
-  assert.match(odd.out, /::warning::the crowds question was not answered \(HTTP 500\)/);
-});
+// DFO-83 (2026-11-07): .github/workflows/relay-load.yml was removed as part of the inherited-operational-Actions
+// cleanup, along with this file's test of its by-hand dispatch, token guard and metrics step - those were pure
+// workflow-content assertions with nothing surviving independent of the deleted file.

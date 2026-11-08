@@ -768,7 +768,7 @@ test('SHIP-PVP the board\'s prize rows (navalYardWindow.js wantedText): a wreck\
   win.unmount();
 });
 
-test('SHIP-PVP the seams by source: the naval host\'s guns asked and its seams built; the sea\'s host builds the guns and the wreck\'s half, steps them and hears the referee; the world hands it my cell, a stranger and a name, and routes the referee\'s sea words; the socket\'s gate; the relay\'s dispatch, gone, beat and read-back; the routes; the deploy watches the law (mutants: each seam)', () => {
+test('SHIP-PVP the seams by source: the naval host\'s guns asked and its seams built; the sea\'s host builds the guns and the wreck\'s half, steps them and hears the referee; the world hands it my cell, a stranger and a name, and routes the referee\'s sea words; the socket\'s gate; the relay\'s dispatch, gone, beat and read-back; the routes (mutants: each seam)', () => {
   const naval = src('src/scenes/naval/navalHost.js');
   assert.match(naval, /hitBy: \(s\) => shipShot\(s\) \|\| pvp\.open\(p\.id, s, isMine\(s\)\) \}\);/);
   assert.match(naval, /if \(typeof e\.target === 'string' && e\.target\.startsWith\('peer:'\)\) \{\n\s+if \(!isMine\(e\.shooter\)\) return;\n\s+const hurt = shotDamage\(gun, zone, \{ roll: random\(\), weight: e\.weight \}\);\n\s+if \(e\.type !== 'blast'\) gunsRefit\(hurt, e\.shooter\);\n\s+if \(fire\) hurt\.fire = fire;\n\s+pvp\.shot\(e\.target\.slice\(5\), hurt\);\n\s+return;\n\s+\}/);
@@ -801,5 +801,6 @@ test('SHIP-PVP the seams by source: the naval host\'s guns asked and its seams b
   assert.match(idx, /path === '\/v1\/sea\/wreck' \? await seaWreck\(sctx, who\.player, body, \{ gateKey: await gatePublicKey\(env, subtle\) \}\)/);
   assert.match(idx, /: path === '\/v1\/sea\/prize\/collect' \? await seaPrizeCollect\(sctx, who\.player, body\) : await seaPrizeReclaim\(sctx, who\.player, body\);/);
   assert.match(src('server-account/src/service.js'), /'\/v1\/sea\/wreck',\n\s*'\/v1\/sea\/prize\/collect',\n\s*'\/v1\/sea\/prize\/reclaim',/);
-  assert.match(src('.github/workflows/account-deploy.yml'), /- "src\/net\/sea\/seaPrizeLaw\.js"/);
+  // DFO-83 (2026-11-07): the deploy-path check (account-deploy.yml bundling src/net/sea/seaPrizeLaw.js) was
+  // removed with that workflow.
 });

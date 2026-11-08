@@ -124,9 +124,9 @@ test('CI-TIMES THE SHARD RECORDS: runTests hands a runner with a record the summ
   assert.match(bare.stderr, /--record wants the file/);
 });
 
-test('CI-TIMES THE WORKFLOWS: `times` finds the newest saved times (a lookup, nothing downloaded); every shard needs it and restores THAT key exactly, failing on a miss, before it runs - so all eight split by the same times; each shard records and keeps its record; after a green run the PR\'s check and the deploy save the merge under a key the lookup finds, beside the result, never ahead of it (mutants: the shards by the newest each; a miss run on; no record; a failed upload failing the shard; the save out of the lookup\'s reach; the check waiting on the save)', () => {
+test('CI-TIMES THE WORKFLOWS: `times` finds the newest saved times (a lookup, nothing downloaded); every shard needs it and restores THAT key exactly, failing on a miss, before it runs - so all eight split by the same times; each shard records and keeps its record; after a green run the PR\'s check saves the merge under a key the lookup finds, beside the result, never ahead of it (mutants: the shards by the newest each; a miss run on; no record; a failed upload failing the shard; the save out of the lookup\'s reach; the check waiting on the save)', () => {
   const v = read('.github/workflows/verify.yml'), tt = read('.github/workflows/test-times.yml');
-  const c = read('.github/workflows/check.yml'), d = read('.github/workflows/deploy.yml');
+  const c = read('.github/workflows/check.yml');
   assert.match(v, /\n {4}outputs:\n {6}times:\n {8}description: [^\n]+\n {8}value: \$\{\{ jobs\.times\.outputs\.key \}\}\n/);
   const times = v.slice(v.indexOf('\n  times:\n'), v.indexOf('\n  test:\n'));
   assert.match(times, /outputs:\n {6}key: \$\{\{ steps\.find\.outputs\.cache-matched-key \}\}\n/);
@@ -155,6 +155,4 @@ test('CI-TIMES THE WORKFLOWS: `times` finds the newest saved times (a lookup, no
 
   assert.match(c, /\n {2}times:\n {4}needs: \[verify\]\n {4}uses: \.\/\.github\/workflows\/test-times\.yml\n {4}with:\n {6}planned: \$\{\{ needs\.verify\.outputs\.times \}\}\n/);
   assert.match(c, /\n {2}check:\n {4}if: \$\{\{ always\(\) \}\}\n {4}needs: \[verify\]\n/, 'the check never waits on the save');
-  assert.match(d, /\n {2}times:\n {4}needs: \[main, verify\]\n {4}uses: \.\/\.github\/workflows\/test-times\.yml\n {4}with:\n {6}ref: \$\{\{ needs\.main\.outputs\.sha \}\}\n {6}planned: \$\{\{ needs\.verify\.outputs\.times \}\}\n/);
-  assert.match(d, /\n {2}deploy:\n {4}needs: \[verify, site\]\n/, 'nor the publish');
 });

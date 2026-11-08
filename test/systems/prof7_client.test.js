@@ -539,7 +539,7 @@ const GARMENT_WORDS = (buttons) => {
 
 // ─── THE WIRING ──────────────────────────────────────────────────────
 
-test('PROF7 wiring: the street and the dungeon stamp and list their bodies for Hunting\'s kind, the knife drawn while E is held; the loom a Clothing Store\'s or a home\'s station, its crafts and works at it, the Weavers\' counter by name, the stitch\'s band off AGI and SPD, the player\'s own clothing first; a Butcher\'s meat withdrawn slow to rot; a Tracker\'s animals on the compass; the service\'s routes, statuses, refusals and deploy', () => {
+test('PROF7 wiring: the street and the dungeon stamp and list their bodies for Hunting\'s kind, the knife drawn while E is held; the loom a Clothing Store\'s or a home\'s station, its crafts and works at it, the Weavers\' counter by name, the stitch\'s band off AGI and SPD, the player\'s own clothing first; a Butcher\'s meat withdrawn slow to rot; a Tracker\'s animals on the compass; the service\'s routes, statuses and refusals', () => {
   const w = hostText('src/scenes/world.js');
   assert.match(w, /registerPlayerKillListener\('hunting', \(entity\) => \{ bodyStamps\.stamp\(entity\); \}\);/);
   // PIN MOVED (FIELD BUGS 2026-10-07 INDOOR-SKIN): the pool by the mode, a building's too - huntHost.js bodiesHere
@@ -578,7 +578,8 @@ test('PROF7 wiring: the street and the dungeon stamp and list their bodies for H
   // SEAT2b part two (PIN MOVED): and the held town the station stands in (`seat`, its crafting halls' steps)
   assert.match(c, /craft: \(character, recipe, clean, name, rid, heartwood = false, dye = null, seat = null, cracked = false\) => post\('\/v1\/prof\/craft', \{ character, recipe, clean, name, rid, heartwood, \.\.\.\(dye == null \? \{\} : \{ dye \}\), \.\.\.\(seat == null \? \{\} : \{ seat \}\), \.\.\.\(cracked === true \? \{ cracked: true \} : \{\}\), mint: MINT_VERSION \}\),/);   // PIN MOVED (PROF10): a Lapidary's `cracked` gem; PIN MOVED (AUDIT FB1026d C3): the mint version this build mints
   for (const word of ['prof-hunt-cap', 'prof-hunt-high', 'prof-foe', 'prof-dye']) assert.doesNotMatch(accountRefusalText(word), /problem|could not be read/, word);
-  assert.match(src('.github/workflows/account-deploy.yml'), /- "src\/characters\/dyes\.js"/);
+  // DFO-83 (2026-11-07): the deploy-path check (account-deploy.yml bundling src/characters/dyes.js) was removed
+  // with that workflow.
   assert.match(src('src/systems/foraging/foragingInstall.js'), /hudText\(brokeMessage\(item\.templateIndex, item\.name\)\);/);
   assert.equal(recipeById('knife:iron').templateIndex, SKINNING_KNIFE.templateIndex);
   assert.equal(TRACE_ACT.startDeg < TRACE_ACT.spanYawDeg, true);

@@ -660,14 +660,7 @@ test('PATREON-LINK: its secrets never touch a file - the toml carries Mac\'s cli
   assert.deepEqual(titlesHeld(fifty, { PATREON_TIERS: tiers }), ['hierophant'], 'a $50 patron holds the Hierophant by their pledge');
   assert.deepEqual(glyphsOf(fifty, { PATREON_TIERS: tiers }, AFTER + 30 * 86_400), ['hierophant'], 'and wears its crown');
   assert.doesNotMatch(toml, /^PATREON_(CLIENT|WEBHOOK)_SECRET\s*=/m, 'Cloudflare refuses a secret the name of a bound var');
-  const yml = src('.github/workflows/account-deploy.yml');
-  const step = yml.slice(yml.indexOf('- name: Put the Patreon secrets'), yml.indexOf('- name: Verify /v1/health names this deploy'));
-  assert.ok(step.length > 100, 'the step is there, before the deploy is verified');
-  assert.ok(yml.indexOf('- name: Deploy') < yml.indexOf('- name: Put the Patreon secrets'), 'after the Worker is up');
-  assert.match(step, /PATREON_CLIENT_SECRET: \$\{\{ secrets\.PATREON_CLIENT_SECRET \}\}/);
-  assert.match(step, /PATREON_WEBHOOK_SECRET: \$\{\{ secrets\.PATREON_WEBHOOK_SECRET \}\}/);
-  assert.match(step, /jq -n 'env \| \{PATREON_CLIENT_SECRET, PATREON_WEBHOOK_SECRET\}[^\n]*\| \$WRANGLER secret bulk/);
-  assert.doesNotMatch(step, /echo "\$\{?PATREON_(CLIENT|WEBHOOK)_SECRET/, 'a secret is never echoed');
-  assert.match(step, /steps\.deploy\.outputs\.base/, 'the addresses Patreon is told are read off the deploy');
+  // DFO-83 (2026-11-07): the deploy's own step (account-deploy.yml putting PATREON_CLIENT_SECRET and
+  // PATREON_WEBHOOK_SECRET through one pipe after the Worker is up) was removed with that workflow.
   for (const word of ['patreon-closed', 'patreon-down', 'patreon-needs-account', 'signature']) assert.equal(typeof REFUSALS[word], 'string', word);
 });

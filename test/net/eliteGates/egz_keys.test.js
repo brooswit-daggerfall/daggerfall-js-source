@@ -342,9 +342,6 @@ test('EG-ZA THE FORCE VOID (section 22): a `force` relay deploy stamps the Worke
   });
   const L = { op: T0, end: null };
   assert.deepEqual([egForceVoided(L, T0 + 1), egForceVoided(L, T0), egForceVoided(L, 0), egForceVoided({ ...L, end: 'tear' }, T0 + 1)], [true, false, false, false]);
-  const wf = rd('.github/workflows/relay-deploy.yml'), step = wf.slice(wf.indexOf('- name: Deploy\n'), wf.indexOf('- name: Verify /health'));
-  assert.match(step, /FORCE: \$\{\{ github\.event\.inputs\.force \}\}/);
-  assert.match(step, /if \[ "\$FORCE" = "true" \]; then\n\s+stamp=\$\(date \+%s%3N\)\n[^\n]*\n\s+npx --yes wrangler@4 deploy --var "EG_VOID_BEFORE:\$\{stamp\}"\n\s+else\n\s+npx --yes wrangler@4 deploy\n\s+fi/, 'the stamp on a force deploy alone');
 });
 
 test('EG-ZA THE TICK (section 22, THE COST): a breach\'s beat is BRAIN_TICK_MS only while a trial runs with its company in the room, a second otherwise (never past the stage\'s own end), and none while the arch rises - its first beat the open; no gap of the run passes EG_GAP_MS, so nothing is given back for it (mutants: the trial\'s beat always; the slow beat past the stage\'s end; beats while the arch rises; a closing\'s foe unseen)', async () => {

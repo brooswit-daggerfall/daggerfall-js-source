@@ -249,11 +249,8 @@ test('HOME1 the client\'s door: every call rides the one session as a Bearer hea
     assert.equal(typeof REFUSALS[w], 'string', `${w} has its sentence`);
   }
   assert.match(REFUSALS['home-cap'], /at most 3 homes/);
-  // the deploy: the law is bundled, so a change to it deploys the Worker; and the smoke reads a town and refuses a guest
-  const wf = src('.github/workflows/account-deploy.yml');
-  assert.match(wf, /- "src\/net\/homeLaw\.js"/);
-  assert.match(wf, /\$base\/v1\/homes\/town/);
-  assert.match(wf, /grep -q '"homes-need-account"' \/tmp\/claim\.json/);
+  // DFO-83 (2026-11-07): the deploy-path check (account-deploy.yml bundling src/net/homeLaw.js, and its smoke
+  // reading a town and refusing a guest) was removed with that workflow.
 });
 
 test('HOME1 the client\'s law: a home can be Daggerfall\'s for-sale house or an ordinary residence, never a faction\'s House2, a shop or a keyless building; bought only when no quest is set in it; its things live under a scene of its OWN (never the building\'s); it sells back at the deed\'s share; the door\'s one answer - nobody\'s, mine, open to me (public, my party holding the owner, my account\'s other character, my quest\'s building), shut; the words (mutants: a faction house for sale, the quest ignored, one scene for both, the share, public shut, the quest rung lost)', () => {
