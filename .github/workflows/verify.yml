@@ -97,7 +97,8 @@ jobs:
         if: steps.deps.outputs.cache-hit != 'true'
         run: npm ci
       - name: FIRST-VISIT pins
-        # src/firstVisitPins.js is generated and gitignored; npm ci's postinstall writes it, which a cache hit skips
+        # src/firstVisitPins.js is generated and gitignored; this step writes it explicitly, every job, inside the
+        # containment boundary - DFO-83/DFO-11: no longer npm ci's postinstall, which ran it uncontained
         run: tools/containedRun.sh node scripts/firstVisitPins.mjs
       - name: Lint
         run: tools/containedRun.sh npm run lint
@@ -148,7 +149,8 @@ jobs:
         if: steps.deps.outputs.cache-hit != 'true'
         run: npm ci
       - name: FIRST-VISIT pins
-        # src/firstVisitPins.js is generated and gitignored; npm ci's postinstall writes it, which a cache hit skips
+        # src/firstVisitPins.js is generated and gitignored; this step writes it explicitly, every job, inside the
+        # containment boundary - DFO-83/DFO-11: no longer npm ci's postinstall, which ran it uncontained
         run: tools/containedRun.sh node scripts/firstVisitPins.mjs
       - name: The times the shards split by
         if: needs.times.outputs.key != ''
@@ -198,7 +200,8 @@ jobs:
         if: steps.deps.outputs.cache-hit != 'true'
         run: npm ci
       - name: FIRST-VISIT pins
-        # src/firstVisitPins.js is generated and gitignored; npm ci's postinstall writes it, which a cache hit skips
+        # src/firstVisitPins.js is generated and gitignored; this step writes it explicitly, every job, inside the
+        # containment boundary - DFO-83/DFO-11: no longer npm ci's postinstall, which ran it uncontained
         run: tools/containedRun.sh node scripts/firstVisitPins.mjs
       - name: Build
         run: tools/containedRun.sh npm run build
