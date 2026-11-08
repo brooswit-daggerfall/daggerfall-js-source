@@ -66,27 +66,40 @@
 #   - $ROOT (the repository checkout, read-write): every wrapped command's own code and the files
 #     it reads or writes (test-harness/ output, a generated src/firstVisitPins.js, dist/ from a
 #     build) live here.
-#   - a DISPOSABLE COPY of $RUNNER_TEMP, bound at its real path (read-write, if $RUNNER_TEMP is
-#     set) - see "DISPOSABLE RUNNER_TEMP STAGING" immediately below; not a live bind of the real
-#     directory.
+#   - an EMPTY disposable directory bound at $RUNNER_TEMP's real path, holding ONLY the one named
+#     input/output path (if any) a caller explicitly declares - see "DISPOSABLE RUNNER_TEMP
+#     STAGING" immediately below. Nothing else from the real $RUNNER_TEMP is ever made visible.
 #   - /proc, /dev, /tmp: bwrap's own freshly-constructed versions (not the host's), needed for
 #     ordinary process operation (reading own PID's /proc entry, /dev/null, /dev/urandom, a scratch
 #     /tmp some tools assume exists) - not a bind of anything the host itself put there.
 #
-# DISPOSABLE RUNNER_TEMP STAGING (REVIEW FIX, DFO-83 52222/52236: "broad runner-temp credential
-# surfaces" / "narrowly scoped disposable temp paths" - a prior draft bound the REAL $RUNNER_TEMP
-# directory straight into the sandbox read-write. That is live, shared CI-runner scratch space -
-# whatever else any other step or action left there is a real directory the sandboxed command
-# could read, not just the one file or subdirectory the caller actually needs. Fixed by never
-# binding the real directory in at all: before the sandbox runs, its current contents are copied
-# (`cp -a`) into a freshly created, disposable directory (`mktemp -d`, on the real host, never
-# inside the sandbox); THAT disposable copy - not the real directory - is what gets bound at the
-# real $RUNNER_TEMP path inside the sandbox, so a command's own `$RUNNER_TEMP`-relative reads/
-# writes work unmodified. After the command exits (success or failure - this still needs to run,
-# matching the existing tolerance for a partial/missing record file elsewhere in these workflows),
-# the disposable copy's resulting contents are copied back out over the real directory, then the
-# disposable copy is deleted. The sandboxed process therefore only ever sees a point-in-time,
-# single-invocation copy, round-tripped - never the live directory other steps/jobs share.
+# DISPOSABLE RUNNER_TEMP STAGING, an explicit PER-CALLER TRANSFER CONTRACT (REVIEW FIX, DFO-83
+# 52252: a prior draft here copied the ENTIRE real $RUNNER_TEMP directory's contents into a
+# disposable directory before binding that in, and copied the ENTIRE resulting tree back out on
+# exit. That was still wrong, just one layer removed: the full point-in-time COPY was just as
+# readable to the sandboxed command as the real directory would have been - including any
+# credential or unrelated cross-step data anyone else left in RUNNER_TEMP - and the whole-tree
+# copy-back let the sandboxed command influence arbitrary files returned to the live runner
+# directory. Fixed by never exposing "the contents of RUNNER_TEMP" as a concept at all: the
+# disposable directory this binds in starts and stays EMPTY except for exactly what a caller
+# explicitly names via two optional environment variables it sets on its own workflow step, each
+# naming ONE path relative to $RUNNER_TEMP:
+#   - CONTAINED_RUN_TEMP_IN: an existing input the command needs to READ (e.g. test-times.yml's
+#     downloaded shard artifacts). Copied into the disposable directory, at the SAME relative
+#     path, before the sandbox runs - nothing else from the real directory is copied alongside it.
+#     Fails closed (exit 94) if the named path does not exist at the real location: a declared,
+#     required input that is missing is a configuration error, not something to proceed past
+#     silently with an empty directory.
+#   - CONTAINED_RUN_TEMP_OUT: an output artifact the command is expected to WRITE (e.g. a test
+#     shard's `--record` file). Copied back out to the real $RUNNER_TEMP, at the same relative
+#     path, after the command exits (success or failure, via a trap - matching this ticket's
+#     existing tolerance for a partial/missing record file) - ONLY that one named path, if it
+#     exists; nothing else the command wrote anywhere else in its copy of $RUNNER_TEMP is ever
+#     copied back, so it cannot influence any other file in the live runner directory.
+# Neither variable set (the common case - lint/types/build/sweep/intro checks never touch
+# $RUNNER_TEMP at all): $RUNNER_TEMP is not bound into the sandbox in any form. Only the two
+# callers that actually need it (see "Callers" below) set one of these each - never both at once
+# today, though the mechanism supports a caller that needs both.
 #
 # CHILD-PROCESS CONFINEMENT, stated accurately rather than assumed (REVIEW FIX, DFO-83 52222: the
 # prior draft's header claimed "a child that itself calls `unshare` to leave the namespace is not
@@ -205,12 +218,18 @@
 # through this script:
 #   - check.yml's verify.yml (all 3 jobs): `npm ci --ignore-scripts` (--allow-network) and
 #     `npm rebuild` on a cache miss, the FIRST-VISIT pins step, `npm run lint`, `npm run types`,
-#     each test shard (`node tools/testShards.mjs <i>/8`), and `npm run build`.
-#   - test-times.yml: the merge step (`node tools/testTimes.mjs --merge ...`). No npm ci here -
-#     this job does not need node_modules.
-#   - eg-sweep.yml: `npm ci --ignore-scripts`/`npm rebuild` on a cache miss, and both sweep steps.
+#     each test shard (`node tools/testShards.mjs <i>/8`), and `npm run build`. The test-shard step
+#     sets `CONTAINED_RUN_TEMP_OUT=test-times.json` (its own `--record` output - see "DISPOSABLE
+#     RUNNER_TEMP STAGING" above).
+#   - test-times.yml: the merge step (`node tools/testTimes.mjs --merge ...`), which sets
+#     `CONTAINED_RUN_TEMP_IN=test-times` (the shard artifacts an earlier, unwrapped
+#     actions/download-artifact step already placed there). No npm ci here - this job does not
+#     need node_modules.
+#   - eg-sweep.yml: `npm ci --ignore-scripts`/`npm rebuild` on a cache miss, and both sweep steps -
+#     neither touches $RUNNER_TEMP, so neither sets either variable and it is not bound in at all.
 #   - intro-quality.yml: `npm ci --ignore-scripts`/`npm rebuild`, the intro's own tests, the audio
-#     landmark check, the live probe, and the review capture.
+#     landmark check, the live probe, and the review capture - same as eg-sweep.yml, none of these
+#     touch $RUNNER_TEMP.
 # It must NOT wrap `npx playwright install --with-deps chromium` or the `which ffmpeg || apt-get
 # install` step: both need real network AND real system-level write access (`--with-deps`/apt
 # write to /var/lib/dpkg, /etc/apt - not something any $HOME/credential-isolation model addresses,
@@ -293,21 +312,33 @@ for v in "${ALLOW_VARS[@]}"; do
 done
 ENV_ARGS+=(--setenv CONTAINED_RUN_REAL_HOME_ID "$REAL_HOME_ID" --setenv CONTAINED_RUN_ROOT "$ROOT" --setenv CONTAINED_RUN_NETWORK_MODE "$NETWORK_MODE")
 
-# Disposable RUNNER_TEMP staging (see "DISPOSABLE RUNNER_TEMP STAGING" above): never bind the real,
-# possibly-shared directory in - copy its current contents into a fresh disposable directory, bind
-# THAT at the real path instead, and copy the result back out (always, win or lose) once the
-# sandboxed command has exited.
+# Disposable RUNNER_TEMP staging, per-caller transfer contract (see "DISPOSABLE RUNNER_TEMP
+# STAGING" above): the disposable directory starts and stays EMPTY except for exactly the one
+# input and/or one output path a caller names - never a copy of the real directory's contents.
+TEMP_IN_REL="${CONTAINED_RUN_TEMP_IN:-}"
+TEMP_OUT_REL="${CONTAINED_RUN_TEMP_OUT:-}"
 STAGE_DIR=""
-if [ -n "$RUNNER_TEMP_DIR" ]; then
-  mkdir -p "$RUNNER_TEMP_DIR"
+if [ -n "$RUNNER_TEMP_DIR" ] && { [ -n "$TEMP_IN_REL" ] || [ -n "$TEMP_OUT_REL" ]; }; then
   STAGE_DIR="$(mktemp -d)"
-  cp -a "$RUNNER_TEMP_DIR/." "$STAGE_DIR/" 2>/dev/null || true
+  if [ -n "$TEMP_IN_REL" ]; then
+    SRC="$RUNNER_TEMP_DIR/$TEMP_IN_REL"
+    if [ ! -e "$SRC" ]; then
+      echo "containedRun: declared input \$RUNNER_TEMP/$TEMP_IN_REL (CONTAINED_RUN_TEMP_IN) does not exist - refusing to run without it: $*" >&2
+      exit 94
+    fi
+    mkdir -p "$(dirname "$STAGE_DIR/$TEMP_IN_REL")"
+    cp -a "$SRC" "$STAGE_DIR/$TEMP_IN_REL"
+  fi
+  if [ -n "$TEMP_OUT_REL" ]; then
+    mkdir -p "$(dirname "$STAGE_DIR/$TEMP_OUT_REL")"
+  fi
 fi
 cleanup_stage() {
-  if [ -n "$STAGE_DIR" ]; then
-    cp -a "$STAGE_DIR/." "$RUNNER_TEMP_DIR/" 2>/dev/null || true
-    rm -rf "$STAGE_DIR"
+  if [ -n "$STAGE_DIR" ] && [ -n "$TEMP_OUT_REL" ] && [ -e "$STAGE_DIR/$TEMP_OUT_REL" ]; then
+    mkdir -p "$(dirname "$RUNNER_TEMP_DIR/$TEMP_OUT_REL")"
+    cp -a "$STAGE_DIR/$TEMP_OUT_REL" "$RUNNER_TEMP_DIR/$TEMP_OUT_REL"
   fi
+  [ -n "$STAGE_DIR" ] && rm -rf "$STAGE_DIR"
 }
 trap cleanup_stage EXIT
 

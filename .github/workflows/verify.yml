@@ -173,6 +173,9 @@ jobs:
           key: ${{ needs.times.outputs.key }}
           fail-on-cache-miss: true
       - name: Test shard ${{ matrix.shard }} of 8
+        env:
+          # DFO-83/DFO-11: the only RUNNER_TEMP path this step may see/return - see tools/containedRun.sh
+          CONTAINED_RUN_TEMP_OUT: test-times.json
         run: tools/containedRun.sh node tools/testShards.mjs ${{ matrix.shard }}/8 --record "$RUNNER_TEMP/test-times.json"
       - name: Keep this shard's times
         if: ${{ !cancelled() }}

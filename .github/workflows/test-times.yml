@@ -54,6 +54,9 @@ jobs:
           path: ${{ runner.temp }}/test-times
           merge-multiple: false
       - name: Merge them
+        env:
+          # DFO-83/DFO-11: the only RUNNER_TEMP path this step may see - see tools/containedRun.sh
+          CONTAINED_RUN_TEMP_IN: test-times
         run: tools/containedRun.sh node tools/testTimes.mjs --merge "$RUNNER_TEMP/test-times"
       - name: Save them for the next run's shards
         uses: actions/cache/save@v4
