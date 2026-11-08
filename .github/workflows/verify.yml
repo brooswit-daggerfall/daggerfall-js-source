@@ -15,6 +15,11 @@
 # callers were removed with the rest of the inherited operational
 # workflows; check.yml is the only remaining caller of this file.
 #
+# DFO-83/DFO-11 (not yet authorized to run): every step below that runs
+# repository code (the pins, lint, types, each shard, the build) goes
+# through tools/containedRun.sh - see that script for why. `npm ci` stays
+# outside it: dependency install needs the real registry.
+#
 # The shard count is in two places that must agree - the matrix and the
 # `/8` - and test/tooling/flow1_ci.test.js holds them together.
 #
@@ -93,11 +98,11 @@ jobs:
         run: npm ci
       - name: FIRST-VISIT pins
         # src/firstVisitPins.js is generated and gitignored; npm ci's postinstall writes it, which a cache hit skips
-        run: node scripts/firstVisitPins.mjs
+        run: tools/containedRun.sh node scripts/firstVisitPins.mjs
       - name: Lint
-        run: npm run lint
+        run: tools/containedRun.sh npm run lint
       - name: Type-check
-        run: npm run types
+        run: tools/containedRun.sh npm run types
 
   times:
     name: the shards' times
@@ -144,7 +149,7 @@ jobs:
         run: npm ci
       - name: FIRST-VISIT pins
         # src/firstVisitPins.js is generated and gitignored; npm ci's postinstall writes it, which a cache hit skips
-        run: node scripts/firstVisitPins.mjs
+        run: tools/containedRun.sh node scripts/firstVisitPins.mjs
       - name: The times the shards split by
         if: needs.times.outputs.key != ''
         uses: actions/cache/restore@v4
@@ -153,7 +158,7 @@ jobs:
           key: ${{ needs.times.outputs.key }}
           fail-on-cache-miss: true
       - name: Test shard ${{ matrix.shard }} of 8
-        run: node tools/testShards.mjs ${{ matrix.shard }}/8 --record "$RUNNER_TEMP/test-times.json"
+        run: tools/containedRun.sh node tools/testShards.mjs ${{ matrix.shard }}/8 --record "$RUNNER_TEMP/test-times.json"
       - name: Keep this shard's times
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -194,6 +199,6 @@ jobs:
         run: npm ci
       - name: FIRST-VISIT pins
         # src/firstVisitPins.js is generated and gitignored; npm ci's postinstall writes it, which a cache hit skips
-        run: node scripts/firstVisitPins.mjs
+        run: tools/containedRun.sh node scripts/firstVisitPins.mjs
       - name: Build
-        run: npm run build
+        run: tools/containedRun.sh npm run build

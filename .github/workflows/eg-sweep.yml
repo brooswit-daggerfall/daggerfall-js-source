@@ -27,6 +27,9 @@
 # pitches and the long way round it, a side climb never asked, a Drop and a course, given as the relay gives a hall): 25
 # seeds a band and the golden four, five halls each, both roads - about 50 s a band; it runs when the step above fails too. It stays a fixed 25 (synthetic halls are the pilot's bench,
 # not the law's halls) and can go once the law's halls are THE ASCENT's.
+#
+# DFO-83/DFO-11 (not yet authorized to run): both sweep steps run repository
+# code, so they go through tools/containedRun.sh - see that script for why.
 name: span sweep
 
 on:
@@ -80,7 +83,7 @@ jobs:
         if: steps.deps.outputs.cache-hit != 'true'
         run: npm ci
       - name: Cross every course of band ${{ matrix.band }} with the real motor
-        run: node tools/egSpanSolve.mjs --sweep --band ${{ matrix.band }} --seeds ${{ inputs.seeds || 500 }} --golden --part ${{ matrix.part }}/${{ matrix.parts }}
+        run: tools/containedRun.sh node tools/egSpanSolve.mjs --sweep --band ${{ matrix.band }} --seeds ${{ inputs.seeds || 500 }} --golden --part ${{ matrix.part }}/${{ matrix.parts }}
       - name: Walk every synthetic LAW 9 hall's route of band ${{ matrix.band }} with the real motor
         if: ${{ !cancelled() }}
-        run: node tools/egSpanSolve.mjs --sweep --law9 --band ${{ matrix.band }} --seeds 25 --golden --part ${{ matrix.part }}/${{ matrix.parts }}
+        run: tools/containedRun.sh node tools/egSpanSolve.mjs --sweep --law9 --band ${{ matrix.band }} --seeds 25 --golden --part ${{ matrix.part }}/${{ matrix.parts }}
